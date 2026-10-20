@@ -267,7 +267,6 @@ function scene1(t) {
   }
   const an = prog(t, .6, .8) * (1 - prog(t, 1.3, 1.4));
   ctx.globalAlpha = an; ctx.fillStyle = C.ink; ctx.font = `500 18px ${MONO}`; ctx.textAlign = 'left';
-  ctx.fillText('SFL / DWG-001  ·  SCALE 1:10', 120, 190);
   ctx.globalAlpha = 1;
   const ir = E.inOutExpo(prog(t, 1.3, 1.8));
   ctx.fillStyle = C.green;
@@ -356,7 +355,6 @@ function scene2(t) {
     }
     ctx.fillStyle = C.ink; ctx.font = `500 20px ${MONO}`; ctx.textAlign = 'left';
     ctx.globalAlpha = ta * prog(t, 2.3, 2.5);
-    ctx.fillText('EVERY PIECE  ·  PINUS  ·  END GRAIN', 1116, 860);
     ctx.restore();
   }
   // sawdust as it cuts
@@ -620,7 +618,6 @@ function scene5(t) {
   drawWord(word, W / 2, H / 2 + 110, 300, () => ({}), { weight: 300, sx: .8, spacing: lerp(40, 4, sl) });
   ctx.restore();
   ctx.fillStyle = fg; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'center';
-  ctx.fillText(`${String(k + 1).padStart(2, '0')} / 08`, W / 2, H / 2 + 220);
   if (l < .035) {
     bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.globalCompositeOperation = 'source-over';
     bctx.drawImage(cv, 0, 0);
@@ -653,8 +650,6 @@ function scene6(rt) {
     circle(c[0], c[1], LOGO.circle.r * s * 1.0); ctx.stroke();
     circle(c[0], c[1], LOGO.circle.r * s * 1.35); ctx.stroke();
     ctx.fillStyle = 'rgba(20,20,20,.5)'; ctx.font = `500 16px ${MONO}`; ctx.textAlign = 'left';
-    ctx.fillText(`R ${Math.round(LOGO.circle.r * s)}`, c[0] + LOGO.circle.r * s * .74, c[1] - LOGO.circle.r * s * .74);
-    ctx.fillText('GRID 8PT  ·  CONSTRUCTION', 120, 190);
     ctx.restore();
   }
   const push = 1 + E.inOutCubic(prog(t, 9.0, 15)) * .05;
@@ -718,7 +713,6 @@ function scene6(rt) {
 
 // ---------- overlays ----------
 const HITS = [1.8, 3.8, 6.8, 8.8, 9.8];
-const LABELS = [[0, 'SFL — 01 BLUEPRINT'], [1.8, 'SFL — 02 MATERIAL'], [3.8, 'SFL — 03 BEDS'], [6.8, 'SFL — 04 STORAGE'], [8.8, 'SFL — 05 RANGE'], [9.8, 'SFL — 06 IDENTITY']];
 function hud(t, frame) {
   const a = prog(t, .1, .4) * (1 - prog(t, 12.4, 13.0));
   if (a <= 0) return;
@@ -731,11 +725,6 @@ function hud(t, frame) {
     ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.stroke();
   }
   ctx.font = `500 17px ${MONO}`;
-  let label = '';
-  for (const [s, l] of LABELS) if (t >= s) label = l;
-  ctx.textAlign = 'left'; ctx.fillText(label, m + 18, H - m - 20);
-  ctx.textAlign = 'right';
-  ctx.fillText(`00:00:${String(Math.floor(t)).padStart(2, '0')}:${String(frame % FPS).padStart(2, '0')}`, W - m - 18, H - m - 20);
   ctx.restore();
 }
 function overlays(t, frame) {
