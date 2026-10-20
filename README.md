@@ -132,6 +132,14 @@ In Claude Code: the `cape-town-leads` skill (`.claude/skills/cape-town-leads/`) 
 something like *"find hair salons in the southern suburbs with no website"*. Claude picks
 the flags, runs the tool and summarises the leads.
 
+## Using your Chrome browser (Claude in Chrome)
+If you have the [Claude in Chrome](https://claude.com/chrome) extension, Claude can read
+Google Maps in your own browser instead. It needs no key and no script. Run Claude Code
+on your computer with `claude --chrome` (or use the Claude desktop app with Chrome
+connected) and ask: *"use my Chrome to find barbers in Woodstock with no website"*.
+The `cape-town-leads` skill searches Maps at a normal browsing pace and saves `leads.csv`.
+A cloud session can't reach your browser, so this only works locally.
+
 ## Optional: Google Maps data
 For fuller coverage, use `--source google`:
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Places API (New)**

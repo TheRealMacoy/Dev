@@ -48,6 +48,29 @@ at the Enterprise rate, about US$35 per 1,000 requests after Google's monthly fr
 python -m leadfinder [--source google] --categories "..." --areas "..." --csv leads.csv [--no-sheet] [-v]
 ```
 
+## Browser mode (Claude in Chrome)
+Use this when the user asks to use their Chrome or the Claude in Chrome extension, and the
+`mcp__claude-in-chrome__*` tools are available. It reads Google Maps in the user's own
+browser, at the pace of a person browsing. It needs no API key and no script.
+
+1. Call `tabs_context_mcp`, then open a new tab with `tabs_create_mcp`. Don't touch the
+   user's own tabs.
+2. For each category and area, go to
+   `https://www.google.com/maps/search/<category>+in+<area>,+Cape+Town` (spaces as `+`).
+3. Read the results list with `read_page` or `get_page_text`. In the list, a listing
+   with a website shows a **Website** link or button; one without a website doesn't.
+   Open a listing only when the list doesn't make this clear.
+4. Scroll the results panel to load more, up to about 40 listings per search. Keep at
+   most 5 searches per run unless the user asks for more, and pause between searches.
+5. For each listing with no website (or only a Facebook/Instagram link, if they asked
+   for that), record: name, category, phone, address, rating, reviews, Maps link.
+6. Save the leads as `leads.csv` with the columns in `leadfinder/output.py` (`HEADER`),
+   or append them to an existing file. Close the tabs you opened.
+
+If Google shows a CAPTCHA, an "unusual traffic" page or a sign-in prompt, stop and tell
+the user. Don't try to get past it. If the Chrome tools don't respond, say so and offer
+the OpenStreetMap source instead.
+
 ## 4. Report
 - Say how many unique businesses were found and how many have no website.
 - Show the top 10–15 leads as a table: Business, Category, Phone, Area (and Reviews for Google).
