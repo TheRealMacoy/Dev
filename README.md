@@ -78,3 +78,51 @@ python -m jobagent                    # or: --no-sheet, --no-llm, --max-age 14, 
 ```bash
 pip install pytest && python -m pytest -q
 ```
+
+---
+
+# Cape Town lead finder
+
+Finds businesses in Cape Town that are listed on Google Maps but have **no website**.
+These are good leads for web design or digital marketing work. It uses the official
+**Google Places API**, which has the same listings as Google Maps. Scraping Google's
+pages directly breaks its terms and gets blocked quickly, so the tool doesn't do that.
+
+## How it works
+1. **Search.** For every category × suburb pair (for example "plumber in Woodstock, Cape Town")
+   it runs a Places Text Search limited to the Cape Town metro. Each search returns at
+   most 60 places, so splitting by suburb gives better coverage. The defaults are in
+   `leadfinder/config.py`.
+2. **Filter.** It keeps operational businesses with no website on their listing.
+   With `--include-social`, it also keeps businesses whose only "website" is a
+   Facebook, Instagram, WhatsApp, Linktree (or similar) page.
+3. **Write.** It writes `leads.csv` and appends new rows to the `Leads` tab of your
+   Google Sheet. Rows are deduped by Google place ID, so your **Status** edits are kept.
+
+Columns: Date Found · Business · Category · Phone · Address · Web Presence ·
+Social Link · Rating · Reviews · Google Maps · Place ID · Status
+
+## Setup
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Places API (New)**
+   and turn on billing. Google gives a monthly free allowance; past that, Text Search
+   with the website field costs about US$35 per 1,000 requests.
+2. **APIs & Services → Credentials → Create credentials → API key.** Restrict the key
+   to the Places API.
+3. Add it as the `GOOGLE_PLACES_API_KEY` GitHub secret, or export it locally. The Sheet
+   secrets above are reused for the `Leads` tab.
+
+```bash
+export GOOGLE_PLACES_API_KEY=...
+python -m leadfinder --no-sheet                                    # all defaults
+python -m leadfinder --categories "plumber,barber" --areas "Bellville,Parow" \
+    --include-social --min-reviews 3 --require-phone
+```
+`--max-requests` (default 200) caps billable calls. A full default run is
+33 categories × 32 suburbs, so raise the cap or narrow the search.
+
+In GitHub: **Actions → Cape Town lead finder → Run workflow**. You can set categories
+and suburbs there. The CSV is attached to the run.
+
+In Claude Code: the `cape-town-leads` skill (`.claude/skills/cape-town-leads/`) lets you ask
+something like *"find hair salons in the southern suburbs with no website"*. Claude picks
+the flags, runs the tool and summarises the leads.
