@@ -3,6 +3,11 @@ name: Cape Town lead finder
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: "osm = OpenStreetMap (free, no key); google = Places API (needs GOOGLE_PLACES_API_KEY)"
+        type: choice
+        options: [osm, google]
+        default: osm
       categories:
         description: "Comma-separated categories (blank = defaults)"
         required: false
@@ -14,7 +19,7 @@ on:
         type: boolean
         default: false
       max_requests:
-        description: "Max Places API requests"
+        description: "Max Places API requests (google only)"
         default: "200"
 
 jobs:
@@ -33,12 +38,13 @@ jobs:
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SOURCE: ${{ inputs.source }}
           CATEGORIES: ${{ inputs.categories }}
           AREAS: ${{ inputs.areas }}
           INCLUDE_SOCIAL: ${{ inputs.include_social }}
           MAX_REQUESTS: ${{ inputs.max_requests }}
         run: |
-          args=(--csv leads.csv --max-requests "$MAX_REQUESTS")
+          args=(--source "$SOURCE" --csv leads.csv --max-requests "$MAX_REQUESTS")
           [ -n "$CATEGORIES" ] && args+=(--categories "$CATEGORIES")
           [ -n "$AREAS" ] && args+=(--areas "$AREAS")
           [ "$INCLUDE_SOCIAL" = "true" ] && args+=(--include-social)

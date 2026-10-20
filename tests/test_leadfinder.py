@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from leadfinder import __main__ as cli
-from leadfinder import output, places
+from leadfinder import osm, output, places
 
 
 def place(pid, website=None, reviews=5, phone="021 555 0000", status="OPERATIONAL"):
@@ -47,13 +47,13 @@ def test_cli_keeps_only_businesses_without_a_website(tmp_path, monkeypatch):
                        place("site", website="https://site.co.za"), place("nophone", phone=None)]}
     out = tmp_path / "leads.csv"
     with patch.object(places, "_post", return_value=data):
-        cli.main(["--categories", "plumber", "--areas", "Woodstock", "--no-sheet",
+        cli.main(["--source", "google", "--categories", "plumber", "--areas", "Woodstock", "--no-sheet",
                   "--csv", str(out), "--require-phone"])
     rows = out.read_text().splitlines()
     assert len(rows) == 2 and "Biz none" in rows[1]
 
     with patch.object(places, "_post", return_value=data):
-        cli.main(["--categories", "plumber", "--areas", "Woodstock", "--no-sheet",
+        cli.main(["--source", "google", "--categories", "plumber", "--areas", "Woodstock", "--no-sheet",
                   "--csv", str(out), "--include-social"])
     body = out.read_text()
     assert "Biz fb" in body and "social-only" in body and "Biz site" not in body
@@ -70,3 +70,44 @@ def test_write_sheet_skips_place_ids_already_present():
     assert added == 1
     (rows,), _ = ws.append_rows.call_args
     assert rows[0][output.ID_COL] == "b"
+
+
+def osm_el(oid, **tags):
+    return {"type": "node", "id": oid, "tags": {"name": f"Shop {oid}", **tags}}
+
+
+def test_osm_parse_and_presence():
+    b = osm.parse_element(osm_el(1, shop="hairdresser", phone="021 1", **{"addr:street": "Main Rd",
+                                                                         "addr:suburb": "Observatory"}))
+    assert b.place_id == "osm:node/1" and b.category == "Hairdresser" and b.presence == "none"
+    assert b.address == "Main Rd, Observatory, Cape Town" and b.maps_url.endswith("/node/1")
+    assert osm.parse_element(osm_el(2, shop="bakery", **{"contact:facebook": "shop2"})).presence == "social-only"
+    assert osm.parse_element(osm_el(3, craft="plumber", website="https://p.co.za")).presence == "website"
+
+
+def test_osm_filters_by_category_and_area():
+    data = {"elements": [osm_el(1, shop="hairdresser", **{"addr:suburb": "Woodstock"}),
+                         osm_el(2, amenity="car_repair", **{"addr:suburb": "Bellville"}),
+                         {"type": "node", "id": 3, "tags": {"shop": "bakery"}}]}
+    with patch.object(osm, "_fetch", return_value=data):
+        assert [b.place_id for b in osm.find_businesses()] == ["osm:node/1", "osm:node/2"]
+        assert [b.name for b in osm.find_businesses(["car repair"])] == ["Shop 2"]
+        assert [b.name for b in osm.find_businesses(None, ["woodstock"])] == ["Shop 1"]
+
+
+def test_osm_falls_back_to_second_server():
+    good = MagicMock()
+    good.json.return_value = {"elements": []}
+    with patch.object(osm.requests, "post", side_effect=[osm.requests.ConnectionError("down"), good]) as post:
+        assert osm._fetch() == {"elements": []}
+    assert post.call_args.args[0] == osm.ENDPOINTS[1]
+
+
+def test_cli_defaults_to_osm_without_a_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("GOOGLE_PLACES_API_KEY", raising=False)
+    out = tmp_path / "leads.csv"
+    data = {"elements": [osm_el(1, shop="florist"), osm_el(2, shop="florist", website="https://f.co.za")]}
+    with patch.object(osm, "_fetch", return_value=data):
+        cli.main(["--no-sheet", "--csv", str(out)])
+    rows = out.read_text().splitlines()
+    assert len(rows) == 2 and "Shop 1" in rows[1] and "openstreetmap.org" in rows[1]

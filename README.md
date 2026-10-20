@@ -83,46 +83,64 @@ pip install pytest && python -m pytest -q
 
 # Cape Town lead finder
 
-Finds businesses in Cape Town that are listed on Google Maps but have **no website**.
-These are good leads for web design or digital marketing work. It uses the official
-**Google Places API**, which has the same listings as Google Maps. Scraping Google's
-pages directly breaks its terms and gets blocked quickly, so the tool doesn't do that.
+Finds businesses in Cape Town that have **no website**. These are good leads for web
+design or digital marketing work. There are two data sources:
+
+| | `--source osm` (default) | `--source google` |
+|---|---|---|
+| Data | OpenStreetMap | Google Maps listings |
+| Setup | none: no key, no sign-up, free | Places API key with billing on |
+| Coverage | fewer listings and phone numbers, no reviews | the most complete |
+
+Neither source scrapes Google's pages. Scraping them breaks Google's terms and gets
+blocked quickly, so the tool doesn't do that.
 
 ## How it works
-1. **Search.** For every category × suburb pair (for example "plumber in Woodstock, Cape Town")
-   it runs a Places Text Search limited to the Cape Town metro. Each search returns at
-   most 60 places, so splitting by suburb gives better coverage. The defaults are in
-   `leadfinder/config.py`.
-2. **Filter.** It keeps operational businesses with no website on their listing.
-   With `--include-social`, it also keeps businesses whose only "website" is a
-   Facebook, Instagram, WhatsApp, Linktree (or similar) page.
+1. **Search.**
+   - **OSM:** one free query to the public Overpass API pulls every named shop,
+     trade, office, eatery, clinic and guesthouse in the Cape Town metro. Chain
+     branches (tagged with a brand) are left out.
+   - **Google:** for every category × suburb pair (for example "plumber in Woodstock,
+     Cape Town") it runs a Places Text Search. Each search returns at most 60 places,
+     so splitting by suburb gives better coverage. The defaults are in `leadfinder/config.py`.
+2. **Filter.** It keeps businesses with no website. With `--include-social`, it also
+   keeps businesses whose only "website" is a Facebook, Instagram, WhatsApp, Linktree
+   (or similar) page.
 3. **Write.** It writes `leads.csv` and appends new rows to the `Leads` tab of your
-   Google Sheet. Rows are deduped by Google place ID, so your **Status** edits are kept.
+   Google Sheet. Rows are deduped by place ID, so your **Status** edits are kept.
 
 Columns: Date Found · Business · Category · Phone · Address · Web Presence ·
-Social Link · Rating · Reviews · Google Maps · Place ID · Status
+Social Link · Rating · Reviews · Map Link (Google Maps or OpenStreetMap) · Place ID · Status
 
-## Setup
+## Running it (free, no key)
+```bash
+pip install -r requirements.txt
+python -m leadfinder --no-sheet                                    # whole metro
+python -m leadfinder --no-sheet --categories "hairdresser,car repair,plumber" \
+    --areas "Woodstock,Observatory" --include-social --require-phone
+```
+With OSM, `--categories` matches OSM tags such as `hairdresser`, `beauty`,
+`car repair`, `plumber`, `electrician`, `restaurant` or `bakery`, or the business name.
+`--areas` matches the address, and many OSM entries have no suburb, so an area filter
+can miss some businesses.
+
+In GitHub: **Actions → Cape Town lead finder → Run workflow**. Leave the source as
+`osm`; no secrets are needed unless you want the Google Sheet updated. The CSV is
+attached to the run.
+
+In Claude Code: the `cape-town-leads` skill (`.claude/skills/cape-town-leads/`) lets you ask
+something like *"find hair salons in the southern suburbs with no website"*. Claude picks
+the flags, runs the tool and summarises the leads.
+
+## Optional: Google Maps data
+For fuller coverage, use `--source google`:
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Places API (New)**
    and turn on billing. Google gives a monthly free allowance; past that, Text Search
    with the website field costs about US$35 per 1,000 requests.
 2. **APIs & Services → Credentials → Create credentials → API key.** Restrict the key
    to the Places API.
-3. Add it as the `GOOGLE_PLACES_API_KEY` GitHub secret, or export it locally. The Sheet
-   secrets above are reused for the `Leads` tab.
+3. Set it as `GOOGLE_PLACES_API_KEY`, locally or as a GitHub secret.
 
-```bash
-export GOOGLE_PLACES_API_KEY=...
-python -m leadfinder --no-sheet                                    # all defaults
-python -m leadfinder --categories "plumber,barber" --areas "Bellville,Parow" \
-    --include-social --min-reviews 3 --require-phone
-```
 `--max-requests` (default 200) caps billable calls. A full default run is
-33 categories × 32 suburbs, so raise the cap or narrow the search.
-
-In GitHub: **Actions → Cape Town lead finder → Run workflow**. You can set categories
-and suburbs there. The CSV is attached to the run.
-
-In Claude Code: the `cape-town-leads` skill (`.claude/skills/cape-town-leads/`) lets you ask
-something like *"find hair salons in the southern suburbs with no website"*. Claude picks
-the flags, runs the tool and summarises the leads.
+33 categories × 32 suburbs, so raise the cap or narrow the search. `--min-reviews`
+also works with this source.

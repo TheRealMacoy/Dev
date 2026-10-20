@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 log = logging.getLogger(__name__)
 
 HEADER = ["Date Found", "Business", "Category", "Phone", "Address", "Web Presence",
-          "Social Link", "Rating", "Reviews", "Google Maps", "Place ID", "Status"]
+          "Social Link", "Rating", "Reviews", "Map Link", "Place ID", "Status"]
 ID_COL = HEADER.index("Place ID")
 
 
