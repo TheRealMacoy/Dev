@@ -13,8 +13,9 @@
 <script>
 // Smart Furniture Lab: 15s logo reveal. Every frame is a pure function of t.
 // 120 BPM, one beat = 0.5s.
-// 0–2 blueprint + bouncing green dot · 2–4.5 line-drawn furniture
-// 4.5–7 isometric modular shelving · 7–9 rapid cuts · 9–15 logo build
+// 0–1.8 blueprint + bouncing green dot · 1.8–3.8 solid pine: log → planks
+// 3.8–6.8 single → double → queen → bunk → headboard · 6.8–8.8 storage drawers
+// 8.8–9.8 the range in eight cuts · 9.8–15 logo build
 const W = 1920, H = 1080, FPS = 60, BEAT = 0.5;
 const C = { paper: '#F5F4F0', ink: '#141414', green: '#7BC35C', greenDk: '#5EA543', wood: '#C9A27A', line: 'rgba(20,20,20,.12)' };
 const SANS = 'Inter, sans-serif';
@@ -162,70 +163,76 @@ function drawLogo(t, ox, oy, s, p) {
   ctx.restore();
 }
 
-// ---------- line-drawn furniture ----------
-function circlePts(cx, cy, r, n = 28) { return [...Array(n + 1).keys()].map(i => [cx + Math.cos(i / n * TAU) * r, cy + Math.sin(i / n * TAU) * r]); }
-const ICONS = [
-  { name: 'CHAIR', paths: [
-    [[-.5, 0], [.5, 0], [.5, .12], [-.5, .12], [-.5, 0]],
-    [[-.45, .12], [-.52, .9]], [[.45, .12], [.52, .9]],
-    [[-.45, 0], [-.45, -.88]], [[.45, 0], [.45, -.88]],
-    [[-.45, -.88], [.45, -.88]], [[-.45, -.56], [.45, -.56]], [[-.45, -.72], [.45, -.72]]] },
-  { name: 'TABLE', paths: [
-    [[-.95, -.12], [.95, -.12], [.95, .02], [-.95, .02], [-.95, -.12]],
-    [[-.78, .02], [-.84, .82]], [[.78, .02], [.84, .82]], [[-.78, .16], [.78, .16]],
-    [[-.3, -.12], [-.3, -.42], [-.12, -.42], [-.12, -.12]], circlePts(.35, -.32, .16, 24)] },
-  { name: 'LAMP', paths: [
-    [[-.28, -.88], [.28, -.88], [.5, -.3], [-.5, -.3], [-.28, -.88]],
-    [[0, -.3], [0, .82]], [[-.38, .86], [.38, .86]], [[-.38, .86], [-.3, .78], [.3, .78], [.38, .86]],
-    [[-.62, -.12], [-.8, .02]], [[.62, -.12], [.8, .02]], [[0, -.12], [0, .02]]] },
-  { name: 'SOFA', paths: [
-    [[-.98, -.12], [-.98, .48], [.98, .48], [.98, -.12]],
-    [[-.98, -.12], [-.76, -.12], [-.76, .48]], [[.98, -.12], [.76, -.12], [.76, .48]],
-    [[-.76, -.12], [-.76, -.48], [.76, -.48], [.76, -.12]], [[-.76, .16], [.76, .16]], [[0, -.48], [0, .16]],
-    [[-.86, .48], [-.86, .66]], [[.86, .48], [.86, .66]]] },
-  { name: 'SHELF', paths: [
-    [[-.62, -.92], [.62, -.92], [.62, .92], [-.62, .92], [-.62, -.92]],
-    [[-.62, -.3], [.62, -.3]], [[-.62, .32], [.62, .32]],
-    [[-.5, -.3], [-.5, -.76], [-.38, -.76], [-.38, -.3]], [[-.35, -.3], [-.35, -.66], [-.24, -.66], [-.24, -.3]],
-    [[-.2, -.3], [-.06, -.7]], circlePts(.3, .1, .17, 24), [[.18, .32], [.42, .32], [.38, .6], [.22, .6], [.18, .32]]] },
-];
-function pathLen(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
-ICONS.forEach(ic => { ic.lens = ic.paths.map(pathLen); ic.total = ic.lens.reduce((a, b) => a + b, 0); });
-// draw the first `amount` (0..1) of an icon's total length; `from` erases from the start
-function drawIcon(ic, x, y, s, amount, from = 0) {
-  let acc = 0;
-  const a0 = from * ic.total, a1 = amount * ic.total;
-  ctx.beginPath();
-  ic.paths.forEach((pts, k) => {
-    for (let i = 1; i < pts.length; i++) {
-      const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-      const s0 = clamp((a0 - acc) / L), s1 = clamp((a1 - acc) / L);
-      if (s1 > s0) {
-        ctx.moveTo(x + lerp(pts[i - 1][0], pts[i][0], s0) * s, y + lerp(pts[i - 1][1], pts[i][1], s0) * s);
-        ctx.lineTo(x + lerp(pts[i - 1][0], pts[i][0], s1) * s, y + lerp(pts[i - 1][1], pts[i][1], s1) * s);
-      }
-      acc += L;
+// ---------- solid pine: procedural grain ----------
+const PINE = { light: '#EDCB94', mid: '#DDAE6E', dark: '#B5803F', bark: '#6B4423', grain: 'rgba(125,72,24,.38)' };
+let woodTex = null, woodTexV = null;
+function makeWood() {
+  const w = 2048, h = 512;
+  const c = Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const g = c.getContext('2d'), img = g.createImageData(w, h), d = img.data;
+  const r = rng(21);
+  const knots = [...Array(7)].map(() => [r() * w, r() * h, 18 + r() * 26]);
+  const L = [0xED, 0xCB, 0x94], D = [0xC8, 0x92, 0x52];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let yy = y + 14 * Math.sin(x * .0037 + y * .011) + 5 * Math.sin(x * .017);
+    let ring = 0;
+    for (const [kx, ky, kr] of knots) {
+      const dx = (x - kx) * .35, dy = y - ky, dist = Math.hypot(dx, dy);
+      yy += kr * 2.2 * Math.exp(-dist * dist / (kr * kr * 9)) * Math.sign(dy || 1);
+      if (dist < kr) ring = Math.max(ring, .6 * (1 - dist / kr) * (.5 + .5 * Math.sin(dist * .9)));
     }
-  });
-  ctx.stroke();
+    const v = Math.pow(Math.abs(Math.sin(yy * .085)), 6) * .8 + Math.pow(Math.abs(Math.sin(yy * .021 + 1)), 3) * .35 + ring;
+    const k = clamp(v + (r() - .5) * .06);
+    const i = (y * w + x) * 4;
+    d[i] = L[0] + (D[0] - L[0]) * k; d[i + 1] = L[1] + (D[1] - L[1]) * k; d[i + 2] = L[2] + (D[2] - L[2]) * k; d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  woodTex = c;
+  woodTexV = Object.assign(document.createElement('canvas'), { width: h, height: w });
+  const gv = woodTexV.getContext('2d');
+  gv.translate(h, 0); gv.rotate(Math.PI / 2); gv.drawImage(c, 0, 0);
 }
+// fill a rect with pine; `seed` picks a different patch of grain
+function wood(x, y, w, h, seed = 0, vertical = false) {
+  if (w <= 0 || h <= 0) return;
+  const tex = vertical ? woodTexV : woodTex;
+  const sw = Math.min(w, tex.width), sh = Math.min(h, tex.height);
+  const ox = (seed * 397) % Math.max(1, tex.width - sw), oy = (seed * 131) % Math.max(1, tex.height - sh);
+  ctx.drawImage(tex, ox, oy, sw, sh, x, y, w, h);
+}
+// map the grain onto a parallelogram (origin, u edge, v edge) for the isometric faces
+function woodFace(o, u, v, seed = 0, shade = 0) {
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(o[0] + u[0], o[1] + u[1]); ctx.lineTo(o[0] + u[0] + v[0], o[1] + u[1] + v[1]); ctx.lineTo(o[0] + v[0], o[1] + v[1]); ctx.closePath();
+  ctx.save(); ctx.clip();
+  ctx.transform(u[0], u[1], v[0], v[1], o[0], o[1]);
+  ctx.drawImage(woodTex, (seed * 211) % 1500, (seed * 97) % 380, 520, 130, 0, 0, 1, 1);
+  ctx.restore();
+  if (shade) { ctx.fillStyle = `rgba(70,40,10,${shade})`; ctx.fill(); }
+  ctx.stroke();
+  ctx.restore();
+}
+// largest size (up to max) at which a condensed word stays within maxW
+function fitSize(word, max, maxW, sx = .82, spacing = 4) {
+  ctx.font = `300 ${max}px ${COND}`;
+  const w = ctx.measureText(word).width * sx + spacing * (word.length - 1);
+  return w > maxW ? max * maxW / w : max;
+}
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 
-// ---------- scene 1: blueprint (0 – 2) ----------
+// ---------- scene 1: blueprint (0 – 1.8) ----------
 function scene1(t) {
   fillBg(C.paper);
   const g = E.outExpo(prog(t, .05, .9));
   ctx.strokeStyle = C.line; ctx.lineWidth = 1.5;
   for (let x = 0; x <= W; x += 80) {
-    const d = Math.abs(x - W / 2) / (W / 2);
-    const p = clamp(g * 1.6 - d * .6);
+    const p = clamp(g * 1.6 - Math.abs(x - W / 2) / (W / 2) * .6);
     ctx.beginPath(); ctx.moveTo(x, H / 2 - p * H / 2); ctx.lineTo(x, H / 2 + p * H / 2); ctx.stroke();
   }
   for (let y = 0; y <= H; y += 80) {
-    const d = Math.abs(y - H / 2) / (H / 2);
-    const p = clamp(g * 1.6 - d * .6);
+    const p = clamp(g * 1.6 - Math.abs(y - H / 2) / (H / 2) * .6);
     ctx.beginPath(); ctx.moveTo(W / 2 - p * W / 2, y); ctx.lineTo(W / 2 + p * W / 2, y); ctx.stroke();
   }
-  // the green dot falls and bounces on the beat
   const cx = W / 2, floor = 600, r = 26;
   let y = -60, sx = 1, sy = 1;
   if (t >= .2) {
@@ -237,7 +244,6 @@ function scene1(t) {
     if (t >= 1.0) y = floor - r;
     for (const l of [.5, .75, .92]) { const e = Math.exp(-since(t, l) * 26); if (e > .01) { sx *= 1 + .5 * e; sy *= 1 - .4 * e; } }
   }
-  // floor line + shadow
   const fl = E.inOutExpo(prog(t, .3, .7));
   ctx.fillStyle = C.ink; ctx.fillRect(cx - fl * 700, floor, fl * 1400, 2);
   if (t >= .2) {
@@ -245,8 +251,7 @@ function scene1(t) {
     ctx.fillStyle = `rgba(20,20,20,${.12 * sh})`;
     ctx.beginPath(); ctx.ellipse(cx, floor + 6, 40 * sh + 10, 7, 0, 0, TAU); ctx.fill();
   }
-  // dimension line opens out from the dot
-  const dm = E.inOutExpo(prog(t, 1.0, 1.4));
+  const dm = E.inOutExpo(prog(t, .95, 1.3));
   if (dm > 0) {
     const half = dm * 560, yy = floor + 70;
     ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
@@ -256,17 +261,15 @@ function scene1(t) {
       ctx.beginPath(); ctx.moveTo(xe, yy - 16); ctx.lineTo(xe, yy + 16); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(xe - sgn * 14, yy - 8); ctx.lineTo(xe, yy); ctx.lineTo(xe - sgn * 14, yy + 8); ctx.stroke();
     }
-    ctx.fillStyle = C.paper; ctx.fillRect(cx - 90, yy - 18, 180, 36);
+    ctx.fillStyle = C.paper; ctx.fillRect(cx - 110, yy - 18, 220, 36);
     ctx.fillStyle = C.ink; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'center';
-    ctx.fillText(`${Math.round(dm * 1200)} MM`, cx, yy + 8);
+    ctx.fillText('DESIGNED IN PINE', cx, yy + 8);
   }
-  // spec annotation
-  const an = prog(t, .6, .8) * (1 - prog(t, 1.5, 1.6));
+  const an = prog(t, .6, .8) * (1 - prog(t, 1.3, 1.4));
   ctx.globalAlpha = an; ctx.fillStyle = C.ink; ctx.font = `500 18px ${MONO}`; ctx.textAlign = 'left';
   ctx.fillText('SFL / DWG-001  ·  SCALE 1:10', 120, 190);
   ctx.globalAlpha = 1;
-  // dot → iris
-  const ir = E.inOutExpo(prog(t, 1.45, 2.0));
+  const ir = E.inOutExpo(prog(t, 1.3, 1.8));
   ctx.fillStyle = C.green;
   if (ir <= 0) {
     ctx.save(); ctx.translate(cx, y + r); ctx.scale(sx, sy); circle(0, -r, r); ctx.fill(); ctx.restore();
@@ -275,146 +278,351 @@ function scene1(t) {
   }
 }
 
-// ---------- scene 2: line-drawn furniture (2 – 4.5) ----------
+// ---------- scene 2: solid pine (1.8 – 3.8) ----------
+function logRings(cx, cy, R, t) {
+  // bark, heartwood, growth rings drawn from the pith outward
+  ctx.fillStyle = PINE.bark; circle(cx, cy, R * 1.06); ctx.fill();
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+  g.addColorStop(0, '#E3B272'); g.addColorStop(.35, PINE.light); g.addColorStop(1, PINE.mid);
+  ctx.fillStyle = g; circle(cx, cy, R); ctx.fill();
+  ctx.strokeStyle = PINE.grain; ctx.lineWidth = 2.2;
+  const n = 18;
+  for (let i = 1; i <= n; i++) {
+    const p = E.outCubic(prog(t, 1.86 + i * .022, 2.2 + i * .022));
+    if (p <= 0) continue;
+    const rr = R * Math.pow(i / n, .85) * p;
+    ctx.beginPath();
+    for (let k = 0; k <= 72; k++) {
+      const a = k / 72 * TAU;
+      const wob = 1 + .025 * Math.sin(a * 3 + i * .7) + .015 * Math.sin(a * 7 + i);
+      const x = cx + Math.cos(a) * rr * wob, y = cy + Math.sin(a) * rr * wob * .97;
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = PINE.dark; circle(cx, cy, 7); ctx.fill();
+  // drying checks
+  ctx.strokeStyle = 'rgba(90,50,15,.5)'; ctx.lineWidth = 2;
+  for (const a of [.6, 2.9, 4.4]) { ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * R * .55, cy + Math.sin(a) * R * .55); ctx.lineTo(cx + Math.cos(a + .03) * R, cy + Math.sin(a + .03) * R); ctx.stroke(); }
+}
 function scene2(t) {
   fillBg(C.green);
-  const u = t - 2.0, k = clamp(Math.floor(u / BEAT), 0, 4), l = u - k * BEAT;
-  // big index numerals behind
-  ctx.save();
-  ctx.globalAlpha = .12; ctx.fillStyle = C.ink;
-  ctx.font = `200 760px ${COND}`; ctx.textAlign = 'center';
-  ctx.fillText(String(k + 1).padStart(2, '0'), W / 2, H / 2 + 270 - E.outExpo(clamp(l / .3)) * 30);
-  ctx.restore();
-  ctx.strokeStyle = C.ink; ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  const ic = ICONS[k];
-  const draw = E.inOutCubic(clamp(l / .32));
-  const erase = k < 4 ? E.inOutCubic(prog(l, .36, .5)) : 0;
-  const bob = Math.sin(u * 6) * 4;
-  drawIcon(ic, W / 2, H / 2 - 30 + bob, 300, draw, erase);
-  ctx.lineCap = 'butt';
-  // name + counter
-  ctx.save();
-  ctx.beginPath(); ctx.rect(0, 870, W, 110); ctx.clip();
-  ctx.fillStyle = C.ink;
-  drawWord(ic.name, W / 2, 950, 92, (i) => {
-    const q = E.outExpo(clamp((l - i * .025) / .3));
-    const out = k < 4 ? E.inCubic(prog(l, .38, .5)) : 0;
-    return { dy: (1 - q) * 100 - out * 100 };
-  }, { weight: 300, sx: .82, spacing: 18 });
-  ctx.restore();
-  ctx.fillStyle = C.ink; ctx.font = `500 20px ${MONO}`; ctx.textAlign = 'left';
-  ctx.fillText(`${String(k + 1).padStart(2, '0')} / 05`, 120, 190);
-  ctx.textAlign = 'right';
-  ctx.fillText('FORM FOLLOWS FUNCTION', W - 120, 190);
-  // band wipe into scene 3
-  const wp = E.inOutExpo(prog(t, 4.2, 4.5));
-  if (wp > 0) { ctx.fillStyle = C.paper; ctx.fillRect(0, H * (1 - wp), W, H * wp + 2); ctx.fillStyle = C.ink; ctx.fillRect(0, H * (1 - wp) - 4, W, 4); }
+  const cx = 660, cy = H / 2, R0 = 360;
+  const R = R0 * E.outBack(prog(t, 1.8, 2.25));
+  const cut = E.inOutExpo(prog(t, 2.8, 3.3));
+  const N = 7;
+  if (cut <= 0) {
+    if (R > 0) logRings(cx, cy, R, t);
+  } else {
+    // the log is sawn into planks that stretch into a full board wall
+    const bh = 2 * R0 / N, gap = 12;
+    for (let j = 0; j < N; j++) {
+      const y0 = cy - R0 + j * bh;
+      const ty = j * (H / N);
+      const yy = lerp(y0, ty, cut) + Math.sin(j * 1.7) * 30 * Math.sin(Math.PI * cut);
+      const h = lerp(bh, H / N, cut) - gap * cut;
+      const out = E.inExpo(prog(t, 3.4 + j * .025, 3.78));
+      const dirX = j % 2 ? 1 : -1;
+      const dy = (y0 + bh / 2) - cy;
+      const chord = 2 * Math.sqrt(Math.max(0, R0 * R0 - dy * dy));
+      const w = lerp(chord, W + 60, cut);
+      const x = lerp(cx - chord / 2, -30, cut) + dirX * out * (W + 200);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x, yy, w, h); ctx.clip();
+      // end grain fades into long grain as the plank stretches
+      ctx.save();
+      ctx.translate(x - (cx - chord / 2), yy - y0);
+      ctx.globalAlpha = 1 - cut;
+      logRings(cx, cy, R0, t);
+      ctx.restore();
+      ctx.globalAlpha = cut;
+      wood(x, yy, w, h, j * 3 + 1);
+      ctx.globalAlpha = 1;
+      // plank edge shading
+      ctx.fillStyle = 'rgba(80,45,10,.25)'; ctx.fillRect(x, yy + h - 5, w, 5);
+      ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(x, yy, w, 3);
+      ctx.restore();
+    }
+  }
+  // type
+  const ta = 1 - E.inCubic(prog(t, 2.7, 2.85));
+  if (ta > 0) {
+    ctx.save(); ctx.globalAlpha = ta;
+    for (const [word, y, d] of [['SOLID', 520, 0], ['PINE', 790, .08]]) {
+      ctx.save(); ctx.beginPath(); ctx.rect(1100, y - 260, 820, 280); ctx.clip();
+      ctx.fillStyle = C.ink;
+      drawWord(word, 1110, y, 300, (i) => { const q = E.outExpo(prog(t, 2.05 + d + i * .04, 2.55 + d + i * .04)); return { dy: (1 - q) * 280 }; }, { weight: 300, sx: .82, spacing: 6, align: 'left' });
+      ctx.restore();
+    }
+    ctx.fillStyle = C.ink; ctx.font = `500 20px ${MONO}`; ctx.textAlign = 'left';
+    ctx.globalAlpha = ta * prog(t, 2.3, 2.5);
+    ctx.fillText('EVERY PIECE  ·  PINUS  ·  END GRAIN', 1116, 860);
+    ctx.restore();
+  }
+  // sawdust as it cuts
+  const sd = since(t, 2.8);
+  if (sd < .8) {
+    const r = rng(8);
+    for (let i = 0; i < 70; i++) {
+      const life = .4 + r() * .4, a = r() * TAU, v = 200 + r() * 600, j = Math.floor(r() * (N - 1)) + 1;
+      if (sd > life) continue;
+      const q = sd / life;
+      const x = cx + (r() - .5) * 500 + Math.cos(a) * v * q, y = cy - R0 + j * (2 * R0 / N) + Math.sin(a) * v * q * .6 + 300 * q * q;
+      ctx.fillStyle = r() > .5 ? PINE.light : PINE.dark; ctx.globalAlpha = 1 - q;
+      ctx.fillRect(x, y, 4, 4);
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
-// ---------- scene 3: isometric modular shelving (4.5 – 7) ----------
+// ---------- scene 3: the bed range (3.8 – 6.8) ----------
+const PRODUCTS = ['SINGLE BED', 'DOUBLE BED', 'QUEEN BED', 'BUNK BED', 'HEADBOARD', 'STORAGE DRAWERS'];
+function productIndex(t) {
+  if (t < 4.3) return 0; if (t < 4.8) return 1; if (t < 5.3) return 2; if (t < 6.3) return 3; if (t < 6.8) return 4; return 5;
+}
+function productList(t, a, dark = false) {
+  if (a <= 0) return;
+  const k = productIndex(t);
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.font = `500 18px ${MONO}`; ctx.textAlign = 'left';
+  PRODUCTS.forEach((p, i) => {
+    const y = 190 + i * 34;
+    const on = i === k;
+    ctx.fillStyle = on ? C.ink : 'rgba(20,20,20,.35)';
+    ctx.fillText(p, 150, y);
+  });
+  // the marker glides between items
+  const yy = 184 + k * 34 - 6;
+  const prev = Math.max(0, k - 1);
+  const starts = [3.8, 4.3, 4.8, 5.3, 6.3, 6.8];
+  const m = E.outBack(clamp((t - starts[k]) / .25));
+  ctx.fillStyle = C.green;
+  circle(124, lerp(184 + prev * 34 - 6, yy, k === 0 ? 1 : m), 8); ctx.fill();
+  ctx.restore();
+}
+// front elevation of a bed, looking at the foot end; w is the bed width
+function drawBed(cx, floor, w, a, tier = 0, ladder = 0, onlyHead = 0) {
+  const t0 = a;
+  const legs = E.outBack(clamp(t0 * 4));
+  const rail = E.outBack(clamp(t0 * 4 - .4));
+  const head = E.outBack(clamp(t0 * 4 - .8));
+  const matt = E.outBounce(clamp(t0 * 3.2 - 1.1));
+  const pil = E.outBack(clamp(t0 * 4 - 2.2));
+  const fade = 1 - onlyHead;
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  const L = cx - w / 2;
+  const level = (base, k) => {
+    // headboard behind
+    if (head > 0) {
+      const hh = 340 * head, hy = base - 140 - hh + 1;
+      ctx.save();
+      if (k === 0 && onlyHead > 0) { ctx.translate(cx, base - 300); ctx.scale(1 + onlyHead * .22, 1 + onlyHead * .22); ctx.translate(-cx, -(base - 300)); }
+      wood(L - 14, hy, w + 28, hh, 5 + k, true);
+      ctx.strokeRect(L - 14, hy, w + 28, hh);
+      // vertical slats
+      ctx.strokeStyle = 'rgba(20,20,20,.55)'; ctx.lineWidth = 2;
+      const n = Math.max(4, Math.round(w / 70));
+      for (let i = 1; i < n; i++) { const x = L - 14 + (w + 28) * i / n; ctx.beginPath(); ctx.moveTo(x, hy + 40); ctx.lineTo(x, base - 150); ctx.stroke(); }
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 3;
+      wood(L - 30, hy - 26, w + 60, 30, 9 + k);
+      ctx.strokeRect(L - 30, hy - 26, w + 60, 30);
+      ctx.restore();
+    }
+    ctx.save(); ctx.globalAlpha *= fade;
+    if (pil > 0) {
+      const pw = w > 500 ? (w - 80) / 2 : w - 80;
+      const n = w > 500 ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const px = L + 40 + i * (pw + 0);
+        ctx.fillStyle = i === n - 1 ? C.green : '#FFFFFF';
+        rrect(px + 6, base - 285 + (1 - pil) * 60, pw - 12, 54 * pil, 22); ctx.fill(); ctx.stroke();
+      }
+    }
+    if (matt > 0) {
+      const my = lerp(base - 700, base - 245, matt);
+      ctx.fillStyle = '#FFFFFF'; rrect(L + 12, my, w - 24, 78, 16); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(20,20,20,.25)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(L + 26, my + 39); ctx.lineTo(L + w - 26, my + 39); ctx.stroke();
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 3;
+    }
+    if (rail > 0) {
+      const rh = 64 * rail;
+      wood(L, base - 170, w, rh, 2 + k); ctx.strokeRect(L, base - 170, w, rh);
+    }
+    if (legs > 0 && k === 0) {
+      const lh = 110 * legs;
+      for (const x of [L, L + w - 30]) { wood(x, base - lh, 30, lh, 7, true); ctx.strokeRect(x, base - lh, 30, lh); }
+    }
+    ctx.restore();
+  };
+  // bunk: a second tier rises on taller posts, with a guard rail and ladder
+  if (tier > 0) {
+    const top = floor - 420 * tier;
+    ctx.save(); ctx.globalAlpha *= fade;
+    for (const x of [L - 30, L + w]) { wood(x, top - 420, 30, floor - top + 420, 11, true); ctx.strokeRect(x, top - 420, 30, floor - top + 420); }
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha *= fade * clamp(tier * 1.5);
+    level(top, 1);
+    // guard rail
+    wood(L, top - 330, w * .7, 26, 13); ctx.strokeRect(L, top - 330, w * .7, 26);
+    ctx.restore();
+  }
+  level(floor, 0);
+  if (ladder > 0 && tier > 0) {
+    ctx.save(); ctx.globalAlpha *= fade;
+    const lx = L + w - 150, top = floor - 420 * tier - 170;
+    for (const x of [lx, lx + 90]) { wood(x, top, 18, (floor - top) * E.outCubic(ladder), 15, true); ctx.strokeRect(x, top, 18, (floor - top) * E.outCubic(ladder)); }
+    for (let i = 0; i < 6; i++) {
+      const p = E.outBack(clamp(ladder * 6 - i * .7));
+      if (p <= 0) continue;
+      const y = top + 60 + i * ((floor - top - 90) / 5);
+      wood(lx + 18, y, 72 * p, 14, 17 + i); ctx.strokeRect(lx + 18, y, 72 * p, 14);
+    }
+    ctx.restore();
+  }
+}
 function scene3(t) {
   fillBg(C.paper);
-  const u = t - 4.5;
-  const U = 150, ox = W / 2 - 40, oy = 700;
+  // floor + faint grid
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1.5;
+  for (let x = 0; x <= W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  const floor = 860, cx = W / 2 + 240;
+  const fl = E.inOutExpo(prog(t, 3.8, 4.1));
+  ctx.fillStyle = C.ink; ctx.fillRect(cx - fl * 900, floor, fl * 1800, 3);
+  // width per beat: single → double → queen, back to single for the bunk
+  const WS = 430, WD = 640, WQ = 710;
+  let w = WS;
+  w = lerp(w, WD, E.outBack(prog(t, 4.3, 4.55)));
+  w = lerp(w, WQ, E.outBack(prog(t, 4.8, 5.05)));
+  w = lerp(w, 520, E.inOutExpo(prog(t, 5.3, 5.5)));
+  w = lerp(w, WQ, E.inOutExpo(prog(t, 6.25, 6.45)));
+  const build = prog(t, 3.8, 4.25);
+  const tier = E.outBack(prog(t, 5.4, 5.8)) * (1 - E.inExpo(prog(t, 6.2, 6.4)));
+  const ladder = prog(t, 5.75, 6.15) * (1 - prog(t, 6.2, 6.3));
+  const onlyHead = E.inOutCubic(prog(t, 6.3, 6.6));
+  const zoom = lerp(1, .68, E.inOutCubic(prog(t, 5.3, 5.6))) * lerp(1, 1 / .68, E.inOutCubic(prog(t, 6.2, 6.45)));
+  ctx.save();
+  ctx.translate(cx, floor); ctx.scale(zoom, zoom); ctx.translate(-cx, -floor);
+  drawBed(cx, floor, w, build, tier, ladder, onlyHead);
+  // width dimension line tracks the bed
+  const dl = E.outExpo(prog(t, 4.0, 4.35)) * (1 - prog(t, 5.25, 5.35));
+  if (dl > 0) {
+    const y = floor + 60, half = w / 2 * dl;
+    ctx.globalAlpha = dl; ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx - half, y); ctx.lineTo(cx + half, y); ctx.stroke();
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + s * half, y - 14); ctx.lineTo(cx + s * half, y + 14); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  // big product name with a rolling mask
+  const k = productIndex(t);
+  const starts = [3.8, 4.3, 4.8, 5.3, 6.3];
+  const nxt = [4.3, 4.8, 5.3, 6.3, 6.8][k];
+  const name = PRODUCTS[k];
+  ctx.save();
+  ctx.beginPath(); ctx.rect(100, 400, 820, 200); ctx.clip();
+  ctx.fillStyle = C.ink;
+  drawWord(name.split(' ')[0], 130, 570, fitSize(name.split(' ')[0], 190, 600), (i) => {
+    const q = E.outExpo(prog(t, starts[k] + i * .025, starts[k] + .35 + i * .025));
+    const o = E.inCubic(prog(t, nxt - .1, nxt));
+    return { dy: (1 - q) * 200 - (k < 4 ? o * 200 : 0) };
+  }, { weight: 300, sx: .82, spacing: 4, align: 'left' });
+  ctx.restore();
+  ctx.fillStyle = C.ink; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'left';
+  ctx.fillText(`${name.includes('BED') ? 'BED' : 'BEDROOM'}  ·  SOLID PINE`, 138, 640);
+  productList(t, prog(t, 3.85, 4.1));
+  // wipe into scene 4: a pine plank sweeps across
+  const wp = E.inOutExpo(prog(t, 6.55, 6.8));
+  if (wp > 0) { wood(-40, 0, (W + 80) * wp, H, 23); ctx.fillStyle = C.ink; ctx.fillRect((W + 80) * wp - 44, 0, 4, H); }
+}
+
+// ---------- scene 4: storage drawers, isometric (6.8 – 8.8) ----------
+function scene4(t) {
+  fillBg(C.paper);
+  const U = 175, ox = W / 2 + 300, oy = 760;
   const cos30 = Math.cos(Math.PI / 6), sin30 = .5;
-  const zoom = 1 + E.inOutCubic(prog(t, 4.5, 7)) * .12;
-  const exit = E.inExpo(prog(t, 6.72, 7.0));
+  const exit = E.inExpo(prog(t, 8.55, 8.8));
+  const zoom = 1 + E.inOutCubic(prog(t, 6.8, 8.8)) * .1;
   ctx.save();
   ctx.translate(W / 2, H / 2); ctx.scale(zoom, zoom); ctx.translate(-W / 2, -H / 2);
   ctx.translate(0, exit * 1200);
   const P = (x, y, z) => [ox + (x - y) * cos30 * U, oy + (x + y) * sin30 * U - z * U];
-  const poly = (pts, fill, stroke = true) => {
-    ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath();
-    ctx.fillStyle = fill; ctx.fill(); if (stroke) ctx.stroke();
-  };
-  // floor shadow
+  const V = (a, b) => [b[0] - a[0], b[1] - a[1]];
   ctx.fillStyle = 'rgba(20,20,20,.07)';
-  ctx.beginPath(); [P(-2.2, -.3, 0), P(2.4, -.3, 0), P(2.4, 1.4, 0), P(-2.2, 1.4, 0)].forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.fill();
+  ctx.beginPath(); [P(-1.7, -.3, 0), P(1.9, -.3, 0), P(1.9, 1.5, 0), P(-1.7, 1.5, 0)].forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.fill();
   ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  // three chests of three drawers
   const mods = [];
-  for (let i = 0; i < 4; i++) for (let k = 0; k < 3; k++) mods.push({ i, k, n: k * 4 + i });
+  for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) mods.push({ i, k, n: k * 3 + i });
   mods.sort((a, b) => a.i - b.i || a.k - b.k);
-  const r = rng(5);
-  const greens = new Set([1, 6, 8, 11]);
   for (const m of mods) {
-    const t0 = 4.55 + (m.k * 4 + m.i) * .125;
-    const d = prog(t, t0, t0 + .35);
+    const t0 = 6.85 + m.n * .085;
+    const d = prog(t, t0, t0 + .32);
     if (d <= 0) continue;
     const zOff = (1 - E.outBounce(d)) * 4;
-    const x = m.i - 2, y = 0, z = m.k + zOff;
-    // top, right side, front
-    poly([P(x, y, z + 1), P(x + 1, y, z + 1), P(x + 1, y + 1, z + 1), P(x, y + 1, z + 1)], '#FFFFFF');
-    poly([P(x + 1, y, z), P(x + 1, y + 1, z), P(x + 1, y + 1, z + 1), P(x + 1, y, z + 1)], '#DDD7CB');
-    poly([P(x, y + 1, z), P(x + 1, y + 1, z), P(x + 1, y + 1, z + 1), P(x, y + 1, z + 1)], '#EEEAE2');
-    // recess, or a green drawer that slides out on the beat
-    const inset = .12;
-    const isG = greens.has(m.n);
-    if (isG) {
-      const slide = .45 * E.outBack(prog(t, 5.75 + (m.n % 4) * .125, 6.05 + (m.n % 4) * .125)) * (1 - E.inOutCubic(prog(t, 6.45, 6.7)));
-      const yy = y + 1 + slide;
-      if (slide > .01) {
-        poly([P(x + inset, y + 1, z + 1 - inset), P(x + 1 - inset, y + 1, z + 1 - inset), P(x + 1 - inset, yy, z + 1 - inset), P(x + inset, yy, z + 1 - inset)], '#F7F5F0');
-        poly([P(x + 1 - inset, y + 1, z + inset), P(x + 1 - inset, yy, z + inset), P(x + 1 - inset, yy, z + 1 - inset), P(x + 1 - inset, y + 1, z + 1 - inset)], C.greenDk);
-      }
-      poly([P(x + inset, yy, z + inset), P(x + 1 - inset, yy, z + inset), P(x + 1 - inset, yy, z + 1 - inset), P(x + inset, yy, z + 1 - inset)], C.green);
-      const hc = P(x + .5, yy, z + .62);
-      ctx.fillStyle = C.ink; ctx.fillRect(hc[0] - 22, hc[1] - 2, 44, 5);
-    } else {
-      poly([P(x + inset, y + 1, z + inset), P(x + 1 - inset, y + 1, z + inset), P(x + 1 - inset, y + 1, z + 1 - inset), P(x + inset, y + 1, z + 1 - inset)], '#CFC8BA');
-      if (r() > .4) { // a few objects on the shelf
-        const bc = P(x + .5, y + .7, z + inset);
-        ctx.fillStyle = r() > .5 ? C.ink : C.wood;
-        ctx.fillRect(bc[0] - 30, bc[1] - 60, 18, 60); ctx.fillRect(bc[0] - 8, bc[1] - 70, 16, 70);
-      }
+    const x = m.i - 1.5, y = 0, z = m.k * .7 + zOff, hz = .7;
+    const top = [P(x, y, z + hz), P(x + 1, y, z + hz), P(x + 1, y + 1, z + hz), P(x, y + 1, z + hz)];
+    woodFace(top[0], V(top[0], top[1]), V(top[0], top[3]), m.n + 1, 0);
+    const s0 = P(x + 1, y, z), s1 = P(x + 1, y + 1, z), s2 = P(x + 1, y, z + hz);
+    woodFace(s0, V(s0, s1), V(s0, s2), m.n + 4, .22);
+    const f0 = P(x, y + 1, z), f1 = P(x + 1, y + 1, z), f2 = P(x, y + 1, z + hz);
+    woodFace(f0, V(f0, f1), V(f0, f2), m.n + 7, .08);
+    // drawer slides out in a wave on the beat
+    const wave = .55 * E.outBack(prog(t, 7.55 + m.i * .08 + (2 - m.k) * .06, 7.85 + m.i * .08 + (2 - m.k) * .06)) * (1 - E.inOutCubic(prog(t, 8.2 + m.n * .02, 8.45 + m.n * .02)));
+    const ins = .07, yy = y + 1 + wave;
+    if (wave > .01) {
+      const a0 = P(x + ins, y + 1, z + hz - ins), a1 = P(x + 1 - ins, y + 1, z + hz - ins), a3 = P(x + ins, yy, z + hz - ins);
+      ctx.fillStyle = '#F7F1E6';
+      ctx.beginPath(); [a0, a1, P(x + 1 - ins, yy, z + hz - ins), a3].forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath(); ctx.fill(); ctx.stroke();
+      const b0 = P(x + 1 - ins, y + 1, z + ins), b1 = P(x + 1 - ins, yy, z + ins), b2 = P(x + 1 - ins, y + 1, z + hz - ins);
+      woodFace(b0, V(b0, b1), V(b0, b2), m.n + 12, .25);
     }
+    const d0 = P(x + ins, yy, z + ins), d1 = P(x + 1 - ins, yy, z + ins), d2 = P(x + ins, yy, z + hz - ins);
+    woodFace(d0, V(d0, d1), V(d0, d2), m.n + 15, 0);
+    const hc = P(x + .5, yy, z + hz * .55);
+    ctx.fillStyle = C.green; ctx.beginPath(); ctx.roundRect(hc[0] - 28, hc[1] - 5, 56, 11, 5); ctx.fill(); ctx.stroke();
   }
   ctx.restore();
-  // annotations
-  const an = prog(t, 5.0, 5.3) * (1 - prog(t, 6.6, 6.8));
-  if (an > 0) {
-    ctx.globalAlpha = an;
-    const a = P(-2, 1, 0), b = P(2, 1, 0);
-    ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(a[0], a[1] + 40); ctx.lineTo(lerp(a[0], b[0], E.outExpo(prog(t, 5.0, 5.6))), lerp(a[1], b[1], E.outExpo(prog(t, 5.0, 5.6))) + 40); ctx.stroke();
-    ctx.fillStyle = C.ink; ctx.font = `500 20px ${MONO}`; ctx.textAlign = 'left';
-    ctx.fillText('MODULAR SYSTEM  ·  4 × 3', 120, 190);
-    ctx.fillText('MOD-400 / OAK + LAB GREEN', 120, 220);
-    ctx.globalAlpha = 1;
-  }
-  // big outline word behind on the right
-  ctx.save();
-  ctx.globalAlpha = .9 * prog(t, 4.6, 4.9) * (1 - exit);
+  // type
+  const ta = (1 - exit);
+  ctx.save(); ctx.globalAlpha = ta;
+  ctx.beginPath(); ctx.rect(100, 400, 900, 200); ctx.clip();
   ctx.fillStyle = C.ink;
-  drawWord('MODULAR', W - 400, 300, 120, (i) => ({ dy: (1 - E.outExpo(prog(t, 4.6 + i * .03, 5.1 + i * .03))) * 40, alpha: E.outExpo(prog(t, 4.6 + i * .03, 5.1 + i * .03)) }), { weight: 300, sx: .8, spacing: 6 });
+  drawWord('STORAGE', 130, 570, fitSize('STORAGE', 190, 600), (i) => ({ dy: (1 - E.outExpo(prog(t, 6.85 + i * .025, 7.25 + i * .025))) * 200 }), { weight: 300, sx: .82, spacing: 4, align: 'left' });
   ctx.restore();
+  ctx.save(); ctx.globalAlpha = ta;
+  ctx.fillStyle = C.ink; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'left';
+  ctx.fillText('DRAWERS  ·  SOLID PINE', 138, 640);
+  ctx.restore();
+  productList(t, ta);
 }
 
-// ---------- scene 4: rapid cuts (7 – 9) ----------
+// ---------- scene 5: the range, rapid cuts (8.8 – 9.8) ----------
 const CUTS = [
-  ['MODULAR', C.ink, C.paper], ['CRAFTED', C.green, C.ink], ['CONNECTED', C.paper, C.ink], ['ERGONOMIC', C.ink, C.green],
-  ['SUSTAINABLE', C.green, C.paper], ['SMART', C.paper, C.ink], ['FURNITURE', C.ink, C.paper], ['LAB', C.green, C.ink],
+  ['SINGLE', C.ink, C.paper], ['DOUBLE', 'wood', C.ink], ['QUEEN', C.green, C.ink], ['BUNK', C.paper, C.ink],
+  ['STORAGE', 'wood', C.ink], ['HEADBOARDS', C.ink, C.green], ['SOLID', C.green, C.paper], ['PINE', 'wood', C.ink],
 ];
-function scene4(t) {
-  const u = t - 7, k = clamp(Math.floor(u / .25), 0, 7), l = u - k * .25, lp = l / .25;
+function scene5(t) {
+  const u = t - 8.8, k = clamp(Math.floor(u / .125), 0, 7), l = u - k * .125;
   const [word, bg, fg] = CUTS[k];
-  fillBg(bg);
-  ctx.save(); ctx.globalAlpha = .2; ctx.strokeStyle = fg; ctx.fillStyle = fg;
-  switch (k % 4) {
-    case 0: ctx.lineWidth = 2; for (let x = -((l * 600) % 80); x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } break;
-    case 1: for (let x = 0; x < 25; x++) for (let y = 0; y < 14; y++) { circle(40 + x * 80, 40 + y * 80, 6 + 6 * Math.sin(x * .6 + y * .6 - l * 30)); ctx.fill(); } break;
-    case 2: ctx.lineWidth = 8; for (let i = 0; i < 8; i++) { circle(W / 2, H / 2, (i * 140 + l * 800) % 1120); ctx.stroke(); } break;
-    case 3: ctx.lineWidth = 30; for (let i = -20; i < 40; i++) { const o = i * 100 + (l * 1200) % 100; ctx.beginPath(); ctx.moveTo(o, 0); ctx.lineTo(o - H, H); ctx.stroke(); } break;
+  if (bg === 'wood') { fillBg(PINE.mid); wood(0, 0, W, H, k * 5 + 3); } else fillBg(bg);
+  ctx.save(); ctx.globalAlpha = .18; ctx.strokeStyle = fg; ctx.fillStyle = fg;
+  if (bg !== 'wood') switch (k % 3) {
+    case 0: ctx.lineWidth = 2; for (let x = -((l * 900) % 80); x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } break;
+    case 1: ctx.lineWidth = 8; for (let i = 0; i < 8; i++) { circle(W / 2, H / 2, (i * 140 + l * 1400) % 1120); ctx.stroke(); } break;
+    case 2: ctx.lineWidth = 30; for (let i = -20; i < 40; i++) { const o = i * 100 + (l * 2000) % 100; ctx.beginPath(); ctx.moveTo(o, 0); ctx.lineTo(o - H, H); ctx.stroke(); } break;
   }
   ctx.restore();
-  const sl = E.outExpo(clamp(l / .12));
+  const sl = E.outExpo(clamp(l / .08));
   ctx.save();
-  ctx.translate(W / 2, H / 2); ctx.scale(lerp(1.5, 1, sl), lerp(1.5, 1, sl)); ctx.translate(-W / 2, -H / 2);
+  ctx.translate(W / 2, H / 2); ctx.scale(lerp(1.45, 1, sl), lerp(1.45, 1, sl)); ctx.translate(-W / 2, -H / 2);
   ctx.fillStyle = fg;
   drawWord(word, W / 2, H / 2 + 110, 300, () => ({}), { weight: 300, sx: .8, spacing: lerp(40, 4, sl) });
   ctx.restore();
   ctx.fillStyle = fg; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'center';
   ctx.fillText(`${String(k + 1).padStart(2, '0')} / 08`, W / 2, H / 2 + 220);
-  if (l < .05) {
+  if (l < .035) {
+    bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.globalCompositeOperation = 'source-over';
     bctx.drawImage(cv, 0, 0);
     const r = rng(k * 31 + Math.floor(l * 60));
     for (let i = 0; i < 8; i++) {
@@ -425,8 +633,9 @@ function scene4(t) {
   }
 }
 
-// ---------- scene 5: logo build (9 – 15) ----------
-function scene5(t) {
+// ---------- scene 6: logo build (9.8 – 15) ----------
+function scene6(rt) {
+  const t = rt - 0.8; // choreographed on a 9.0 start, played from 9.8
   fillBg(C.paper);
   const s = 1.85, ox = W / 2, oy = H / 2 + 10;
   // construction guides
@@ -481,6 +690,15 @@ function scene5(t) {
     bctx.globalCompositeOperation = 'source-over';
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(buf, 0, 0); ctx.restore();
   }
+  // product line under the mark
+  const tl = E.outExpo(prog(rt, 12.9, 13.6));
+  if (tl > 0) {
+    ctx.save();
+    ctx.globalAlpha = tl; ctx.fillStyle = C.ink; ctx.font = `500 24px ${MONO}`; ctx.textAlign = 'center';
+    ctx.letterSpacing = `${lerp(22, 9, tl)}px`;
+    ctx.fillText('SOLID PINE BEDS  ·  HEADBOARDS  ·  STORAGE', W / 2, oy + 192 * s * push + 70);
+    ctx.restore();
+  }
   // green sparks off the circle when it lands
   const sp = since(t, 9.7);
   if (sp < 1.2) {
@@ -499,10 +717,10 @@ function scene5(t) {
 }
 
 // ---------- overlays ----------
-const HITS = [2.0, 4.5, 7.0, 9.0];
-const LABELS = [[0, 'SFL — 01 BLUEPRINT'], [2.0, 'SFL — 02 OBJECTS'], [4.5, 'SFL — 03 SYSTEM'], [7.0, 'SFL — 04 VALUES'], [9.0, 'SFL — 05 IDENTITY']];
+const HITS = [1.8, 3.8, 6.8, 8.8, 9.8];
+const LABELS = [[0, 'SFL — 01 BLUEPRINT'], [1.8, 'SFL — 02 MATERIAL'], [3.8, 'SFL — 03 BEDS'], [6.8, 'SFL — 04 STORAGE'], [8.8, 'SFL — 05 RANGE'], [9.8, 'SFL — 06 IDENTITY']];
 function hud(t, frame) {
-  const a = prog(t, .1, .4) * (1 - prog(t, 11.6, 12.2));
+  const a = prog(t, .1, .4) * (1 - prog(t, 12.4, 13.0));
   if (a <= 0) return;
   ctx.save();
   ctx.globalAlpha = a;
@@ -522,7 +740,7 @@ function hud(t, frame) {
 }
 function overlays(t, frame) {
   let fl = 0;
-  for (const h of [7.0, 9.0]) fl = Math.max(fl, Math.exp(-since(t, h) * 16));
+  for (const h of [8.8, 9.8]) fl = Math.max(fl, Math.exp(-since(t, h) * 16));
   if (fl > .01) { ctx.fillStyle = `rgba(255,255,255,${fl * .8})`; ctx.fillRect(0, 0, W, H); }
   hud(t, frame);
   const v = ctx.createRadialGradient(W / 2, H / 2, H * .5, W / 2, H / 2, H * 1.1);
@@ -535,7 +753,7 @@ function overlays(t, frame) {
 }
 
 const grain = [];
-const SCENES = [[0, scene1], [2.0, scene2], [4.5, scene3], [7.0, scene4], [9.0, scene5]];
+const SCENES = [[0, scene1], [1.8, scene2], [3.8, scene3], [6.8, scene4], [8.8, scene5], [9.8, scene6]];
 window.renderFrame = function (frame) {
   const t = frame / FPS;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -555,6 +773,7 @@ async function init() {
   await Promise.all([document.fonts.load(`300 100px ${COND}`), document.fonts.load(`200 100px ${COND}`),
     document.fonts.load(`400 100px ${SANS}`), document.fonts.load(`500 100px ${MONO}`)]);
   fitLogo();
+  makeWood();
   const r = rng(7);
   for (let k = 0; k < 6; k++) {
     const g = Object.assign(document.createElement('canvas'), { width: 384, height: 384 });

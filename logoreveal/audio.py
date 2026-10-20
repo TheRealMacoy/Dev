@@ -114,28 +114,28 @@ def blip(freq, length=.08):
     return np.sign(np.sin(2 * np.pi * freq * t)) * env(n, .001, .025) * .5
 
 
-# ---- 0–2: blueprint ----
-air = lowpass(noise(N), 900) * np.clip(T / 1.2, 0, 1) * np.clip((2.0 - T) / .3, 0, 1)
+# ---- 0–1.8: blueprint ----
+air = lowpass(noise(N), 900) * np.clip(T / 1.2, 0, 1) * np.clip((1.8 - T) / .3, 0, 1)
 place(air * .05, 0)
 for k, t in enumerate((.5, .75, .92)):
     place(knock(380 + k * 40, .06), t, .5 - k * .12)
-place(whoosh(.4), .95, .35, pan=-.2)  # dimension line opens
-for i in range(10):
-    place(blip(2600 + i * 60, .02), 1.0 + i * .04, .05)
-place(whoosh(.55, up=True), 1.45, .45)
+place(whoosh(.4), .9, .35, pan=-.2)
+place(whoosh(.5, up=True), 1.3, .45)
 
-# ---- 2–9: groove ----
-for b in range(4, 18):
-    t = b * BEAT
+# ---- 1.8–9.8: groove (beats on 1.8 + 0.5k) ----
+G0 = 1.8
+beats = [G0 + b * BEAT for b in range(16)]
+for b, t in enumerate(beats):
     place(kick(), t, .8)
     place(hat(), t + .25, .2, pan=.3)
-    place(hat(.012), t + .125, .08, pan=-.3)
-    place(hat(.012), t + .375, .08, pan=-.3)
+    if t >= 3.8:
+        place(hat(.012), t + .125, .08, pan=-.3)
+        place(hat(.012), t + .375, .08, pan=-.3)
     if b % 2 == 1:
         place(clap(), t, .38)
 duck = np.ones(N)
-for b in range(4, 18):
-    i = int(b * BEAT * SR)
+for t in beats:
+    i = int(t * SR)
     n = int(.3 * SR)
     duck[i:i + n] = np.minimum(duck[i:i + n], 1 - .8 * np.exp(-np.arange(n) / SR / .08))
 chords = [(45, (57, 60, 64)), (41, (57, 60, 65)), (48, (55, 60, 64)), (43, (55, 59, 62))]
@@ -143,69 +143,87 @@ bass = np.zeros(N)
 pad = np.zeros(N)
 for k in range(4):
     root, ch = chords[k]
-    s, e = int((2 + k * 2) * SR), int((4 + k * 2) * SR)
-    e = min(e, int(9 * SR))
-    if s >= e:
-        continue
-    seg = T[s:e] - T[s]
-    bass[s:e] += np.tanh(2 * np.sin(2 * np.pi * note(root) * seg))
+    s0, e0 = int((G0 + k * 2) * SR), int(min(G0 + k * 2 + 2, 9.8) * SR)
+    seg = T[s0:e0] - T[s0]
+    bass[s0:e0] += np.tanh(2 * np.sin(2 * np.pi * note(root) * seg))
     for m in ch:
         for d in (-.1, .1):
-            pad[s:e] += (2 * ((note(m) * 2 ** (d / 12) * seg) % 1) - 1) / 7
+            pad[s0:e0] += (2 * ((note(m) * 2 ** (d / 12) * seg) % 1) - 1) / 7
 place(lowpass(bass, 230) * duck * .5, 0)
 place(np.stack([lowpass(pad, 1300) * (.4 + .6 * duck)] * 2, 1) * .18, 0)
-# pencil scribble while each icon draws, a marimba knock as it lands
-for k in range(5):
-    t = 2.0 + k * BEAT
-    n = int(.32 * SR)
-    sc = (noise(n) - lowpass(noise(n), 3000)) * (.6 + .4 * np.sin(np.arange(n) / SR * 2 * np.pi * 23)) * np.sin(np.linspace(0, np.pi, n))
-    place(sc * .12, t, pan=.2)
-    place(pluck(note([69, 72, 76, 74, 79][k]), .25), t, .22, pan=-.2)
-place(boom(), 2.0, .55)
-# shelving: a wooden clack as each module lands, drawers slide out
-place(boom(1.5), 4.5, .45)
-for n_ in range(12):
-    t0 = 4.55 + n_ * .125
-    place(knock(300 + (n_ * 37) % 220, .05), t0 + .13, .4, pan=((n_ % 4) - 1.5) * .3)
-for j in range(4):
-    t = 5.75 + j * .125
-    place(whoosh(.18) * .6, t, .25)
-    place(knock(900, .02), t + .17, .2)
-place(whoosh(.3), 6.72, .4)
-# rapid cuts
-place(boom(1.0), 7.0, .5)
-for k in range(8):
-    place(blip(note(74 + k * 2)), 7.0 + k * .25, .22, pan=(-1) ** k * .4)
-    place(knock(600 + k * 50, .03), 7.0 + k * .25, .25)
-place(whoosh(.5, up=True), 8.5, .5)
 
-# ---- 9–15: logo build ----
-place(boom(2.5), 9.0, .7)
+# solid pine: a deep wooden bloom as the log grows, rings ticking, then the saw
+place(boom(), 1.8, .55)
+place(knock(140, .25), 1.8, .5)
+for i in range(18):
+    place(knock(900 + i * 40, .012), 1.86 + i * .022, .05, pan=np.sin(i))
+n = int(.5 * SR)
+tt = np.arange(n) / SR
+saw = np.sign(np.sin(2 * np.pi * 95 * tt + 3 * np.sin(2 * np.pi * 7 * tt))) * .3 + (noise(n) - lowpass(noise(n), 1500)) * .7
+place(saw * np.sin(np.linspace(0, np.pi, n)) ** .5 * .22, 2.8, pan=.1)
+for j in range(7):
+    place(knock(250 + j * 30, .04), 3.3 + j * .02, .25, pan=(j - 3) * .15)
+place(whoosh(.4), 3.4, .4)
+
+# beds: a pluck and a wooden thunk on every change
+place(boom(1.5), 3.8, .45)
+for i, (t, m) in enumerate(((3.8, 69), (4.3, 72), (4.8, 76), (5.3, 74), (6.3, 79))):
+    place(pluck(note(m), .3), t, .22, pan=-.2)
+    place(knock(220 + i * 25, .08), t + .05, .35)
+for i in range(4):  # bed parts landing
+    place(knock(500 + i * 90, .03), 3.82 + i * .1, .2)
+place(knock(180, .12), 4.15, .3)  # mattress drops
+for i in range(6):  # ladder rungs
+    place(knock(1100 + i * 80, .02), 5.8 + i * .06, .12)
+place(whoosh(.35), 6.5, .4)
+
+# storage: a wooden clack as each drawer unit lands, drawers slide in a wave
+place(boom(1.2), 6.8, .45)
+for n_ in range(9):
+    place(knock(300 + (n_ * 37) % 220, .05), 6.85 + n_ * .085 + .14, .4, pan=((n_ % 3) - 1) * .4)
+for j in range(5):
+    place(whoosh(.18) * .6, 7.55 + j * .08, .22)
+    place(knock(900, .02), 7.72 + j * .08, .18)
+for j in range(4):
+    place(knock(700, .02), 8.4 + j * .03, .15)
+place(whoosh(.3), 8.55, .4)
+
+# the range: eight cuts
+place(boom(.8), 8.8, .45)
+for k in range(8):
+    place(blip(note(74 + k * 2)), 8.8 + k * .125, .2, pan=(-1) ** k * .4)
+    place(knock(600 + k * 50, .03), 8.8 + k * .125, .22)
+place(whoosh(.45, up=True), 9.35, .5)
+
+# ---- 9.8–15: logo build ----
+L0 = 0.8
+place(boom(2.5), 9.8, .7)
 lp = np.zeros(N)
 for m in (45, 52, 57, 60, 64, 69):
     for d in (-.08, .08):
         lp += (2 * ((note(m) * 2 ** (d / 12) * T) % 1) - 1)
-lp = lowpass(lp / 12, 600 + 1400 * np.clip((T - 9) / 3, 0, 1)) * np.clip((T - 9.0) / 1.2, 0, 1) * np.clip((15 - T) / 2.5, 0, 1)
+lp = lowpass(lp / 12, 600 + 1400 * np.clip((T - 9.8) / 3, 0, 1)) * np.clip((T - 9.8) / 1.2, 0, 1) * np.clip((15 - T) / 2.2, 0, 1)
 place(np.stack([lp, np.roll(lp, 700)], 1) * .2, 0)
-place(blip(1760, .05), 9.05, .2)
-place(whoosh(.6), 9.25, .4)  # rule draws out
-place(bell(note(57), 1.6), 9.6, .35)  # circle blooms
+place(blip(1760, .05), 9.05 + L0, .2)
+place(whoosh(.6), 9.25 + L0, .4)
+place(bell(note(57), 1.6), 9.6 + L0, .35)
 n = int(1.5 * SR)
 tt = np.arange(n) / SR
-place(np.sin(2 * np.pi * np.cumsum(40 + 60 * np.exp(-tt * 6)) / SR) * np.exp(-tt / .6), 9.6, .45)
-for i, m in enumerate((69, 72, 76)):  # L A B
-    place(pluck(note(m), .4), 10.1 + i * .12, .2, pan=-.2 + i * .2)
-for i, m in enumerate((64, 67, 69, 72, 74, 76, 79, 81, 84)):  # F U R N I T U R E, centre out
-    place(pluck(note(m), .3), 10.5 + i * .09, .14, pan=np.sin(i) * .5)
-for i, m in enumerate((88, 91, 93, 96, 100)):  # Smart
-    place(bell(note(m), .6), 11.25 + i * .1, .05)
-# the finish: chord + shimmer under the light sweep
-place(boom(2.5), 12.0, .45)
+place(np.sin(2 * np.pi * np.cumsum(40 + 60 * np.exp(-tt * 6)) / SR) * np.exp(-tt / .6), 9.6 + L0, .45)
+for i, m in enumerate((69, 72, 76)):
+    place(pluck(note(m), .4), 10.1 + L0 + i * .12, .2, pan=-.2 + i * .2)
+for i, m in enumerate((64, 67, 69, 72, 74, 76, 79, 81, 84)):
+    place(pluck(note(m), .3), 10.5 + L0 + i * .09, .14, pan=np.sin(i) * .5)
+for i, m in enumerate((88, 91, 93, 96, 100)):
+    place(bell(note(m), .6), 11.25 + L0 + i * .1, .05)
+place(boom(2.2), 12.0 + L0, .45)
 for m in (57, 64, 69, 72, 76, 81):
-    place(bell(note(m), 2.2), 12.0, .07)
-cym_n = int(3 * SR)
+    place(bell(note(m), 2.0), 12.0 + L0, .07)
+cym_n = int(2.2 * SR)
 cym = (noise(cym_n) - lowpass(noise(cym_n), 6000)) * env(cym_n, .4, 1.0)
-place(cym * .12, 11.6)
+place(cym * .12, 12.4)
+for i in range(3):
+    place(knock(1400 - i * 200, .03), 12.9 + i * .12, .1)
 
 # ---- master ----
 wet = np.zeros_like(mix)
