@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+jobs.csv
+service_account.json
+.env
