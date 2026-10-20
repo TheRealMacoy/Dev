@@ -1,0 +1,577 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Smart Furniture Lab Reveal</title>
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// Smart Furniture Lab: 15s logo reveal. Every frame is a pure function of t.
+// 120 BPM, one beat = 0.5s.
+// 0–2 blueprint + bouncing green dot · 2–4.5 line-drawn furniture
+// 4.5–7 isometric modular shelving · 7–9 rapid cuts · 9–15 logo build
+const W = 1920, H = 1080, FPS = 60, BEAT = 0.5;
+const C = { paper: '#F5F4F0', ink: '#141414', green: '#7BC35C', greenDk: '#5EA543', wood: '#C9A27A', line: 'rgba(20,20,20,.12)' };
+const SANS = 'Inter, sans-serif';
+const COND = '"Inter Display", Inter, sans-serif';
+const MONO = '"JetBrains Mono", monospace';
+const TAU = Math.PI * 2;
+
+const cv = document.getElementById('c');
+let ctx = cv.getContext('2d');
+const mainCtx = ctx;
+const buf = Object.assign(document.createElement('canvas'), { width: W, height: H });
+const bctx = buf.getContext('2d');
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const E = {
+  outExpo: t => t >= 1 ? 1 : 1 - Math.pow(2, -10 * t),
+  inExpo: t => t <= 0 ? 0 : Math.pow(2, 10 * t - 10),
+  inOutExpo: t => t <= 0 ? 0 : t >= 1 ? 1 : t < .5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2,
+  outBack: t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); },
+  outCubic: t => 1 - Math.pow(1 - t, 3),
+  inCubic: t => t * t * t,
+  inOutCubic: t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+  outElastic: t => { const c4 = TAU / 3; return t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - .75) * c4) + 1; },
+  outBounce: t => {
+    const n1 = 7.5625, d1 = 2.75;
+    if (t < 1 / d1) return n1 * t * t;
+    if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + .75;
+    if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + .9375;
+    return n1 * (t -= 2.625 / d1) * t + .984375;
+  },
+};
+function rng(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const since = (t, h) => t >= h ? t - h : Infinity;
+const pulse = (t, k = 8) => Math.exp(-(((t % BEAT) + BEAT) % BEAT) * k);
+function fillBg(c) { ctx.fillStyle = c; ctx.fillRect(-100, -100, W + 200, H + 200); }
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, TAU); }
+
+// Draws a word letter by letter, horizontally condensed by sx.
+function drawWord(word, x, y, size, fn = () => ({}), { weight = 300, font = COND, sx = 1, spacing = 0, align = 'center' } = {}) {
+  ctx.font = `${weight} ${size}px ${font}`;
+  const chars = [...word];
+  const ws = chars.map(ch => ctx.measureText(ch).width * sx);
+  const total = ws.reduce((a, b) => a + b, 0) + spacing * (chars.length - 1);
+  let cx = align === 'center' ? x - total / 2 : x;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  chars.forEach((ch, i) => {
+    const o = fn(i, chars.length) || {};
+    ctx.save();
+    ctx.globalAlpha *= o.alpha ?? 1;
+    ctx.translate(cx + ws[i] / 2 + (o.dx || 0), y + (o.dy || 0));
+    if (o.rot) ctx.rotate(o.rot);
+    const s = o.scale ?? 1;
+    ctx.scale(sx * s, s);
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+    cx += ws[i] + spacing;
+  });
+  return { left: cx - total - spacing, width: total };
+}
+
+// ---------- the logo, rebuilt as vectors (native box 768×384) ----------
+const LOGO = {
+  smart: { text: 'Smart', baseline: 70, cap: 62, width: 252, weight: 400, font: SANS },
+  furniture: { text: 'FURNITURE', baseline: 206, cap: 94, width: 742, weight: 300, font: COND },
+  lab: { text: 'LAB', baseline: 300, cap: 64, width: 122, weight: 300, font: COND },
+  circle: { x: 373, y: 268, r: 96 },
+  rule: { y: 276, x0: 6, x1: 762, w: 2.6 },
+};
+// Fit each word to the logo's cap height and width once fonts have loaded.
+function fitLogo() {
+  for (const k of ['smart', 'furniture', 'lab']) {
+    const L = LOGO[k];
+    ctx.font = `${L.weight} 100px ${L.font}`;
+    const m = ctx.measureText(k === 'smart' ? 'S' : L.text);
+    const capPer100 = m.actualBoundingBoxAscent;
+    L.size = L.cap / capPer100 * 100;
+    ctx.font = `${L.weight} ${L.size}px ${L.font}`;
+    L.sx = L.width / ctx.measureText(L.text).width;
+  }
+}
+
+// p: per-element progress, all 1 = finished logo. ox/oy: logo centre on screen, s: scale
+function drawLogo(t, ox, oy, s, p) {
+  ctx.save();
+  ctx.translate(ox, oy); ctx.scale(s, s); ctx.translate(-384, -192);
+  const { circle: ci, rule } = LOGO;
+  // rule, drawn outward from the circle
+  if (p.rule > 0) {
+    ctx.fillStyle = C.ink;
+    const l = lerp(ci.x, rule.x0, p.rule), r = lerp(ci.x, rule.x1, p.rule);
+    ctx.fillRect(l, rule.y - rule.w / 2, r - l, rule.w);
+  }
+  // circle
+  if (p.circle > 0) {
+    ctx.fillStyle = C.green;
+    circle(ci.x, ci.y, ci.r * p.circle); ctx.fill();
+  }
+  if (p.dot > 0 && p.circle < .2) {
+    ctx.fillStyle = C.green; circle(ci.x, ci.y, 14 * p.dot); ctx.fill();
+  }
+  // LAB rises inside the circle
+  if (p.lab > 0) {
+    const L = LOGO.lab;
+    ctx.save();
+    circle(ci.x, ci.y, ci.r * Math.max(p.circle, .001)); ctx.clip();
+    ctx.fillStyle = C.ink;
+    drawWord(L.text, ci.x + 2, L.baseline, L.size, (i) => {
+      const q = E.outExpo(clamp(p.lab * 1.6 - i * .25));
+      return { dy: (1 - q) * 120 };
+    }, { weight: L.weight, font: L.font, sx: L.sx, spacing: 0 });
+    ctx.restore();
+  }
+  // FURNITURE drops in through a mask, centre letters first
+  if (p.furniture > 0) {
+    const L = LOGO.furniture;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(-50, L.baseline - L.cap - 30, 868, L.cap + 36); ctx.clip();
+    ctx.fillStyle = C.ink;
+    drawWord(L.text, 384, L.baseline, L.size, (i, n) => {
+      const d = Math.abs(i - (n - 1) / 2) / ((n - 1) / 2);
+      const q = E.outExpo(clamp(p.furniture * 1.7 - d * .7));
+      return { dy: -(1 - q) * (L.cap + 30) };
+    }, { weight: L.weight, font: L.font, sx: L.sx });
+    ctx.restore();
+  }
+  // Smart: letters settle in with a little lift
+  if (p.smart > 0) {
+    const L = LOGO.smart;
+    ctx.fillStyle = C.ink;
+    drawWord(L.text, 376, L.baseline, L.size, (i) => {
+      const q = E.outCubic(clamp(p.smart * 1.8 - i * .2));
+      return { dy: (1 - q) * 28, alpha: q };
+    }, { weight: L.weight, font: L.font, sx: L.sx });
+  }
+  ctx.restore();
+}
+
+// ---------- line-drawn furniture ----------
+function circlePts(cx, cy, r, n = 28) { return [...Array(n + 1).keys()].map(i => [cx + Math.cos(i / n * TAU) * r, cy + Math.sin(i / n * TAU) * r]); }
+const ICONS = [
+  { name: 'CHAIR', paths: [
+    [[-.5, 0], [.5, 0], [.5, .12], [-.5, .12], [-.5, 0]],
+    [[-.45, .12], [-.52, .9]], [[.45, .12], [.52, .9]],
+    [[-.45, 0], [-.45, -.88]], [[.45, 0], [.45, -.88]],
+    [[-.45, -.88], [.45, -.88]], [[-.45, -.56], [.45, -.56]], [[-.45, -.72], [.45, -.72]]] },
+  { name: 'TABLE', paths: [
+    [[-.95, -.12], [.95, -.12], [.95, .02], [-.95, .02], [-.95, -.12]],
+    [[-.78, .02], [-.84, .82]], [[.78, .02], [.84, .82]], [[-.78, .16], [.78, .16]],
+    [[-.3, -.12], [-.3, -.42], [-.12, -.42], [-.12, -.12]], circlePts(.35, -.32, .16, 24)] },
+  { name: 'LAMP', paths: [
+    [[-.28, -.88], [.28, -.88], [.5, -.3], [-.5, -.3], [-.28, -.88]],
+    [[0, -.3], [0, .82]], [[-.38, .86], [.38, .86]], [[-.38, .86], [-.3, .78], [.3, .78], [.38, .86]],
+    [[-.62, -.12], [-.8, .02]], [[.62, -.12], [.8, .02]], [[0, -.12], [0, .02]]] },
+  { name: 'SOFA', paths: [
+    [[-.98, -.12], [-.98, .48], [.98, .48], [.98, -.12]],
+    [[-.98, -.12], [-.76, -.12], [-.76, .48]], [[.98, -.12], [.76, -.12], [.76, .48]],
+    [[-.76, -.12], [-.76, -.48], [.76, -.48], [.76, -.12]], [[-.76, .16], [.76, .16]], [[0, -.48], [0, .16]],
+    [[-.86, .48], [-.86, .66]], [[.86, .48], [.86, .66]]] },
+  { name: 'SHELF', paths: [
+    [[-.62, -.92], [.62, -.92], [.62, .92], [-.62, .92], [-.62, -.92]],
+    [[-.62, -.3], [.62, -.3]], [[-.62, .32], [.62, .32]],
+    [[-.5, -.3], [-.5, -.76], [-.38, -.76], [-.38, -.3]], [[-.35, -.3], [-.35, -.66], [-.24, -.66], [-.24, -.3]],
+    [[-.2, -.3], [-.06, -.7]], circlePts(.3, .1, .17, 24), [[.18, .32], [.42, .32], [.38, .6], [.22, .6], [.18, .32]]] },
+];
+function pathLen(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
+ICONS.forEach(ic => { ic.lens = ic.paths.map(pathLen); ic.total = ic.lens.reduce((a, b) => a + b, 0); });
+// draw the first `amount` (0..1) of an icon's total length; `from` erases from the start
+function drawIcon(ic, x, y, s, amount, from = 0) {
+  let acc = 0;
+  const a0 = from * ic.total, a1 = amount * ic.total;
+  ctx.beginPath();
+  ic.paths.forEach((pts, k) => {
+    for (let i = 1; i < pts.length; i++) {
+      const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      const s0 = clamp((a0 - acc) / L), s1 = clamp((a1 - acc) / L);
+      if (s1 > s0) {
+        ctx.moveTo(x + lerp(pts[i - 1][0], pts[i][0], s0) * s, y + lerp(pts[i - 1][1], pts[i][1], s0) * s);
+        ctx.lineTo(x + lerp(pts[i - 1][0], pts[i][0], s1) * s, y + lerp(pts[i - 1][1], pts[i][1], s1) * s);
+      }
+      acc += L;
+    }
+  });
+  ctx.stroke();
+}
+
+// ---------- scene 1: blueprint (0 – 2) ----------
+function scene1(t) {
+  fillBg(C.paper);
+  const g = E.outExpo(prog(t, .05, .9));
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1.5;
+  for (let x = 0; x <= W; x += 80) {
+    const d = Math.abs(x - W / 2) / (W / 2);
+    const p = clamp(g * 1.6 - d * .6);
+    ctx.beginPath(); ctx.moveTo(x, H / 2 - p * H / 2); ctx.lineTo(x, H / 2 + p * H / 2); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += 80) {
+    const d = Math.abs(y - H / 2) / (H / 2);
+    const p = clamp(g * 1.6 - d * .6);
+    ctx.beginPath(); ctx.moveTo(W / 2 - p * W / 2, y); ctx.lineTo(W / 2 + p * W / 2, y); ctx.stroke();
+  }
+  // the green dot falls and bounces on the beat
+  const cx = W / 2, floor = 600, r = 26;
+  let y = -60, sx = 1, sy = 1;
+  if (t >= .2) {
+    const fall = prog(t, .2, .5);
+    y = lerp(-60, floor - r, fall * fall);
+    for (const [a, b, h] of [[.5, .75, 170], [.75, .92, 70], [.92, 1.0, 22]]) {
+      if (t >= a && t < b) { const u = (t - a) / (b - a); y = floor - r - h * 4 * u * (1 - u); }
+    }
+    if (t >= 1.0) y = floor - r;
+    for (const l of [.5, .75, .92]) { const e = Math.exp(-since(t, l) * 26); if (e > .01) { sx *= 1 + .5 * e; sy *= 1 - .4 * e; } }
+  }
+  // floor line + shadow
+  const fl = E.inOutExpo(prog(t, .3, .7));
+  ctx.fillStyle = C.ink; ctx.fillRect(cx - fl * 700, floor, fl * 1400, 2);
+  if (t >= .2) {
+    const sh = clamp(1 - (floor - r - y) / 400);
+    ctx.fillStyle = `rgba(20,20,20,${.12 * sh})`;
+    ctx.beginPath(); ctx.ellipse(cx, floor + 6, 40 * sh + 10, 7, 0, 0, TAU); ctx.fill();
+  }
+  // dimension line opens out from the dot
+  const dm = E.inOutExpo(prog(t, 1.0, 1.4));
+  if (dm > 0) {
+    const half = dm * 560, yy = floor + 70;
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx - half, yy); ctx.lineTo(cx + half, yy); ctx.stroke();
+    for (const sgn of [-1, 1]) {
+      const xe = cx + sgn * half;
+      ctx.beginPath(); ctx.moveTo(xe, yy - 16); ctx.lineTo(xe, yy + 16); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(xe - sgn * 14, yy - 8); ctx.lineTo(xe, yy); ctx.lineTo(xe - sgn * 14, yy + 8); ctx.stroke();
+    }
+    ctx.fillStyle = C.paper; ctx.fillRect(cx - 90, yy - 18, 180, 36);
+    ctx.fillStyle = C.ink; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'center';
+    ctx.fillText(`${Math.round(dm * 1200)} MM`, cx, yy + 8);
+  }
+  // spec annotation
+  const an = prog(t, .6, .8) * (1 - prog(t, 1.5, 1.6));
+  ctx.globalAlpha = an; ctx.fillStyle = C.ink; ctx.font = `500 18px ${MONO}`; ctx.textAlign = 'left';
+  ctx.fillText('SFL / DWG-001  ·  SCALE 1:10', 120, 190);
+  ctx.globalAlpha = 1;
+  // dot → iris
+  const ir = E.inOutExpo(prog(t, 1.45, 2.0));
+  ctx.fillStyle = C.green;
+  if (ir <= 0) {
+    ctx.save(); ctx.translate(cx, y + r); ctx.scale(sx, sy); circle(0, -r, r); ctx.fill(); ctx.restore();
+  } else {
+    circle(cx, floor - r, r + ir * 1300); ctx.fill();
+  }
+}
+
+// ---------- scene 2: line-drawn furniture (2 – 4.5) ----------
+function scene2(t) {
+  fillBg(C.green);
+  const u = t - 2.0, k = clamp(Math.floor(u / BEAT), 0, 4), l = u - k * BEAT;
+  // big index numerals behind
+  ctx.save();
+  ctx.globalAlpha = .12; ctx.fillStyle = C.ink;
+  ctx.font = `200 760px ${COND}`; ctx.textAlign = 'center';
+  ctx.fillText(String(k + 1).padStart(2, '0'), W / 2, H / 2 + 270 - E.outExpo(clamp(l / .3)) * 30);
+  ctx.restore();
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const ic = ICONS[k];
+  const draw = E.inOutCubic(clamp(l / .32));
+  const erase = k < 4 ? E.inOutCubic(prog(l, .36, .5)) : 0;
+  const bob = Math.sin(u * 6) * 4;
+  drawIcon(ic, W / 2, H / 2 - 30 + bob, 300, draw, erase);
+  ctx.lineCap = 'butt';
+  // name + counter
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 870, W, 110); ctx.clip();
+  ctx.fillStyle = C.ink;
+  drawWord(ic.name, W / 2, 950, 92, (i) => {
+    const q = E.outExpo(clamp((l - i * .025) / .3));
+    const out = k < 4 ? E.inCubic(prog(l, .38, .5)) : 0;
+    return { dy: (1 - q) * 100 - out * 100 };
+  }, { weight: 300, sx: .82, spacing: 18 });
+  ctx.restore();
+  ctx.fillStyle = C.ink; ctx.font = `500 20px ${MONO}`; ctx.textAlign = 'left';
+  ctx.fillText(`${String(k + 1).padStart(2, '0')} / 05`, 120, 190);
+  ctx.textAlign = 'right';
+  ctx.fillText('FORM FOLLOWS FUNCTION', W - 120, 190);
+  // band wipe into scene 3
+  const wp = E.inOutExpo(prog(t, 4.2, 4.5));
+  if (wp > 0) { ctx.fillStyle = C.paper; ctx.fillRect(0, H * (1 - wp), W, H * wp + 2); ctx.fillStyle = C.ink; ctx.fillRect(0, H * (1 - wp) - 4, W, 4); }
+}
+
+// ---------- scene 3: isometric modular shelving (4.5 – 7) ----------
+function scene3(t) {
+  fillBg(C.paper);
+  const u = t - 4.5;
+  const U = 150, ox = W / 2 - 40, oy = 700;
+  const cos30 = Math.cos(Math.PI / 6), sin30 = .5;
+  const zoom = 1 + E.inOutCubic(prog(t, 4.5, 7)) * .12;
+  const exit = E.inExpo(prog(t, 6.72, 7.0));
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(zoom, zoom); ctx.translate(-W / 2, -H / 2);
+  ctx.translate(0, exit * 1200);
+  const P = (x, y, z) => [ox + (x - y) * cos30 * U, oy + (x + y) * sin30 * U - z * U];
+  const poly = (pts, fill, stroke = true) => {
+    ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill(); if (stroke) ctx.stroke();
+  };
+  // floor shadow
+  ctx.fillStyle = 'rgba(20,20,20,.07)';
+  ctx.beginPath(); [P(-2.2, -.3, 0), P(2.4, -.3, 0), P(2.4, 1.4, 0), P(-2.2, 1.4, 0)].forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.fill();
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  const mods = [];
+  for (let i = 0; i < 4; i++) for (let k = 0; k < 3; k++) mods.push({ i, k, n: k * 4 + i });
+  mods.sort((a, b) => a.i - b.i || a.k - b.k);
+  const r = rng(5);
+  const greens = new Set([1, 6, 8, 11]);
+  for (const m of mods) {
+    const t0 = 4.55 + (m.k * 4 + m.i) * .125;
+    const d = prog(t, t0, t0 + .35);
+    if (d <= 0) continue;
+    const zOff = (1 - E.outBounce(d)) * 4;
+    const x = m.i - 2, y = 0, z = m.k + zOff;
+    // top, right side, front
+    poly([P(x, y, z + 1), P(x + 1, y, z + 1), P(x + 1, y + 1, z + 1), P(x, y + 1, z + 1)], '#FFFFFF');
+    poly([P(x + 1, y, z), P(x + 1, y + 1, z), P(x + 1, y + 1, z + 1), P(x + 1, y, z + 1)], '#DDD7CB');
+    poly([P(x, y + 1, z), P(x + 1, y + 1, z), P(x + 1, y + 1, z + 1), P(x, y + 1, z + 1)], '#EEEAE2');
+    // recess, or a green drawer that slides out on the beat
+    const inset = .12;
+    const isG = greens.has(m.n);
+    if (isG) {
+      const slide = .45 * E.outBack(prog(t, 5.75 + (m.n % 4) * .125, 6.05 + (m.n % 4) * .125)) * (1 - E.inOutCubic(prog(t, 6.45, 6.7)));
+      const yy = y + 1 + slide;
+      if (slide > .01) {
+        poly([P(x + inset, y + 1, z + 1 - inset), P(x + 1 - inset, y + 1, z + 1 - inset), P(x + 1 - inset, yy, z + 1 - inset), P(x + inset, yy, z + 1 - inset)], '#F7F5F0');
+        poly([P(x + 1 - inset, y + 1, z + inset), P(x + 1 - inset, yy, z + inset), P(x + 1 - inset, yy, z + 1 - inset), P(x + 1 - inset, y + 1, z + 1 - inset)], C.greenDk);
+      }
+      poly([P(x + inset, yy, z + inset), P(x + 1 - inset, yy, z + inset), P(x + 1 - inset, yy, z + 1 - inset), P(x + inset, yy, z + 1 - inset)], C.green);
+      const hc = P(x + .5, yy, z + .62);
+      ctx.fillStyle = C.ink; ctx.fillRect(hc[0] - 22, hc[1] - 2, 44, 5);
+    } else {
+      poly([P(x + inset, y + 1, z + inset), P(x + 1 - inset, y + 1, z + inset), P(x + 1 - inset, y + 1, z + 1 - inset), P(x + inset, y + 1, z + 1 - inset)], '#CFC8BA');
+      if (r() > .4) { // a few objects on the shelf
+        const bc = P(x + .5, y + .7, z + inset);
+        ctx.fillStyle = r() > .5 ? C.ink : C.wood;
+        ctx.fillRect(bc[0] - 30, bc[1] - 60, 18, 60); ctx.fillRect(bc[0] - 8, bc[1] - 70, 16, 70);
+      }
+    }
+  }
+  ctx.restore();
+  // annotations
+  const an = prog(t, 5.0, 5.3) * (1 - prog(t, 6.6, 6.8));
+  if (an > 0) {
+    ctx.globalAlpha = an;
+    const a = P(-2, 1, 0), b = P(2, 1, 0);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1] + 40); ctx.lineTo(lerp(a[0], b[0], E.outExpo(prog(t, 5.0, 5.6))), lerp(a[1], b[1], E.outExpo(prog(t, 5.0, 5.6))) + 40); ctx.stroke();
+    ctx.fillStyle = C.ink; ctx.font = `500 20px ${MONO}`; ctx.textAlign = 'left';
+    ctx.fillText('MODULAR SYSTEM  ·  4 × 3', 120, 190);
+    ctx.fillText('MOD-400 / OAK + LAB GREEN', 120, 220);
+    ctx.globalAlpha = 1;
+  }
+  // big outline word behind on the right
+  ctx.save();
+  ctx.globalAlpha = .9 * prog(t, 4.6, 4.9) * (1 - exit);
+  ctx.fillStyle = C.ink;
+  drawWord('MODULAR', W - 400, 300, 120, (i) => ({ dy: (1 - E.outExpo(prog(t, 4.6 + i * .03, 5.1 + i * .03))) * 40, alpha: E.outExpo(prog(t, 4.6 + i * .03, 5.1 + i * .03)) }), { weight: 300, sx: .8, spacing: 6 });
+  ctx.restore();
+}
+
+// ---------- scene 4: rapid cuts (7 – 9) ----------
+const CUTS = [
+  ['MODULAR', C.ink, C.paper], ['CRAFTED', C.green, C.ink], ['CONNECTED', C.paper, C.ink], ['ERGONOMIC', C.ink, C.green],
+  ['SUSTAINABLE', C.green, C.paper], ['SMART', C.paper, C.ink], ['FURNITURE', C.ink, C.paper], ['LAB', C.green, C.ink],
+];
+function scene4(t) {
+  const u = t - 7, k = clamp(Math.floor(u / .25), 0, 7), l = u - k * .25, lp = l / .25;
+  const [word, bg, fg] = CUTS[k];
+  fillBg(bg);
+  ctx.save(); ctx.globalAlpha = .2; ctx.strokeStyle = fg; ctx.fillStyle = fg;
+  switch (k % 4) {
+    case 0: ctx.lineWidth = 2; for (let x = -((l * 600) % 80); x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } break;
+    case 1: for (let x = 0; x < 25; x++) for (let y = 0; y < 14; y++) { circle(40 + x * 80, 40 + y * 80, 6 + 6 * Math.sin(x * .6 + y * .6 - l * 30)); ctx.fill(); } break;
+    case 2: ctx.lineWidth = 8; for (let i = 0; i < 8; i++) { circle(W / 2, H / 2, (i * 140 + l * 800) % 1120); ctx.stroke(); } break;
+    case 3: ctx.lineWidth = 30; for (let i = -20; i < 40; i++) { const o = i * 100 + (l * 1200) % 100; ctx.beginPath(); ctx.moveTo(o, 0); ctx.lineTo(o - H, H); ctx.stroke(); } break;
+  }
+  ctx.restore();
+  const sl = E.outExpo(clamp(l / .12));
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(lerp(1.5, 1, sl), lerp(1.5, 1, sl)); ctx.translate(-W / 2, -H / 2);
+  ctx.fillStyle = fg;
+  drawWord(word, W / 2, H / 2 + 110, 300, () => ({}), { weight: 300, sx: .8, spacing: lerp(40, 4, sl) });
+  ctx.restore();
+  ctx.fillStyle = fg; ctx.font = `500 22px ${MONO}`; ctx.textAlign = 'center';
+  ctx.fillText(`${String(k + 1).padStart(2, '0')} / 08`, W / 2, H / 2 + 220);
+  if (l < .05) {
+    bctx.drawImage(cv, 0, 0);
+    const r = rng(k * 31 + Math.floor(l * 60));
+    for (let i = 0; i < 8; i++) {
+      const y = r() * H, h = 10 + r() * 80, off = (r() - .5) * 240;
+      ctx.drawImage(buf, 0, y, W, h, off, y, W, h);
+      if (i % 3 === 0) { ctx.fillStyle = C.green; ctx.globalAlpha = .8; ctx.fillRect(0, y, W, 4); ctx.globalAlpha = 1; }
+    }
+  }
+}
+
+// ---------- scene 5: logo build (9 – 15) ----------
+function scene5(t) {
+  fillBg(C.paper);
+  const s = 1.85, ox = W / 2, oy = H / 2 + 10;
+  // construction guides
+  const gd = E.outExpo(prog(t, 9.0, 9.6)) * (1 - E.inOutCubic(prog(t, 12.0, 12.6)));
+  if (gd > 0) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(20,20,20,.18)'; ctx.lineWidth = 1.5; ctx.setLineDash([8, 10]);
+    const L = (x0, y0, x1, y1) => { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(lerp(x0, x1, gd), lerp(y0, y1, gd)); ctx.stroke(); };
+    const toS = (x, y) => [ox + (x - 384) * s, oy + (y - 192) * s];
+    const c = toS(LOGO.circle.x, LOGO.circle.y);
+    L(c[0], 0, c[0], H); L(0, c[1], W, c[1]);
+    for (const yy of [LOGO.smart.baseline, LOGO.furniture.baseline, LOGO.furniture.baseline - LOGO.furniture.cap, LOGO.lab.baseline]) { const p = toS(0, yy); L(0, p[1], W, p[1]); }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = gd;
+    circle(c[0], c[1], LOGO.circle.r * s * 1.0); ctx.stroke();
+    circle(c[0], c[1], LOGO.circle.r * s * 1.35); ctx.stroke();
+    ctx.fillStyle = 'rgba(20,20,20,.5)'; ctx.font = `500 16px ${MONO}`; ctx.textAlign = 'left';
+    ctx.fillText(`R ${Math.round(LOGO.circle.r * s)}`, c[0] + LOGO.circle.r * s * .74, c[1] - LOGO.circle.r * s * .74);
+    ctx.fillText('GRID 8PT  ·  CONSTRUCTION', 120, 190);
+    ctx.restore();
+  }
+  const push = 1 + E.inOutCubic(prog(t, 9.0, 15)) * .05;
+  const p = {
+    dot: E.outBack(prog(t, 9.05, 9.3)),
+    rule: E.inOutExpo(prog(t, 9.25, 9.85)),
+    circle: E.outElastic(prog(t, 9.6, 10.6)),
+    lab: prog(t, 10.05, 10.8),
+    furniture: prog(t, 10.45, 11.45),
+    smart: prog(t, 11.2, 11.95),
+  };
+  // ripples from the circle
+  const c = [ox + (LOGO.circle.x - 384) * s * push, oy + (LOGO.circle.y - 192) * s * push];
+  for (const [h, k] of [[9.6, 1], [9.85, .6]]) {
+    const d = since(t, h);
+    if (d < .9) { const q = E.outCubic(d / .9); ctx.strokeStyle = `rgba(123,195,92,${(1 - q) * .8 * k})`; ctx.lineWidth = 3; circle(c[0], c[1], LOGO.circle.r * s * (1 + q * 1.6)); ctx.stroke(); }
+  }
+  drawLogo(t, ox, oy, s * push, p);
+  // light sweep: the logo is redrawn into a buffer, masked by a moving band, and added on top
+  const sw = prog(t, 12.0, 12.75);
+  if (sw > 0 && sw < 1) {
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.globalCompositeOperation = 'source-over';
+    bctx.clearRect(0, 0, W, H);
+    ctx = bctx;
+    drawLogo(t, ox, oy, s * push, p);
+    ctx = mainCtx;
+    const x = lerp(-300, W + 300, E.inOutCubic(sw));
+    const g = bctx.createLinearGradient(x - 180, 0, x + 180, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.5, 'rgba(255,255,255,.6)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    bctx.globalCompositeOperation = 'source-in';
+    bctx.fillStyle = g; bctx.fillRect(0, 0, W, H);
+    bctx.globalCompositeOperation = 'source-over';
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(buf, 0, 0); ctx.restore();
+  }
+  // green sparks off the circle when it lands
+  const sp = since(t, 9.7);
+  if (sp < 1.2) {
+    const r = rng(3);
+    for (let i = 0; i < 40; i++) {
+      const a = r() * TAU, v = 300 + r() * 700, life = .5 + r() * .7;
+      if (sp > life) continue;
+      const q = E.outCubic(sp / life);
+      const d = LOGO.circle.r * s + q * v * .6;
+      ctx.fillStyle = r() > .3 ? C.green : C.ink;
+      ctx.globalAlpha = 1 - sp / life;
+      circle(c[0] + Math.cos(a) * d, c[1] + Math.sin(a) * d, 3 + r() * 5); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------- overlays ----------
+const HITS = [2.0, 4.5, 7.0, 9.0];
+const LABELS = [[0, 'SFL — 01 BLUEPRINT'], [2.0, 'SFL — 02 OBJECTS'], [4.5, 'SFL — 03 SYSTEM'], [7.0, 'SFL — 04 VALUES'], [9.0, 'SFL — 05 IDENTITY']];
+function hud(t, frame) {
+  const a = prog(t, .1, .4) * (1 - prog(t, 11.6, 12.2));
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.globalCompositeOperation = 'difference';
+  ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.lineWidth = 2;
+  const m = 48, L = 32;
+  for (const [x, y, sx, sy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]]) {
+    ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.stroke();
+  }
+  ctx.font = `500 17px ${MONO}`;
+  let label = '';
+  for (const [s, l] of LABELS) if (t >= s) label = l;
+  ctx.textAlign = 'left'; ctx.fillText(label, m + 18, H - m - 20);
+  ctx.textAlign = 'right';
+  ctx.fillText(`00:00:${String(Math.floor(t)).padStart(2, '0')}:${String(frame % FPS).padStart(2, '0')}`, W - m - 18, H - m - 20);
+  ctx.restore();
+}
+function overlays(t, frame) {
+  let fl = 0;
+  for (const h of [7.0, 9.0]) fl = Math.max(fl, Math.exp(-since(t, h) * 16));
+  if (fl > .01) { ctx.fillStyle = `rgba(255,255,255,${fl * .8})`; ctx.fillRect(0, 0, W, H); }
+  hud(t, frame);
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .5, W / 2, H / 2, H * 1.1);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.16)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = .045; ctx.globalCompositeOperation = 'overlay';
+  const g = grain[frame % grain.length], ox = (frame * 131) % 384, oy = (frame * 71) % 384;
+  for (let x = -ox; x < W; x += 384) for (let y = -oy; y < H; y += 384) ctx.drawImage(g, x, y);
+  ctx.restore();
+}
+
+const grain = [];
+const SCENES = [[0, scene1], [2.0, scene2], [4.5, scene3], [7.0, scene4], [9.0, scene5]];
+window.renderFrame = function (frame) {
+  const t = frame / FPS;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
+  let sh = 0;
+  for (const h of HITS) sh = Math.max(sh, Math.exp(-since(t, h) * 10));
+  const r = rng(frame * 13 + 1);
+  ctx.translate((r() - .5) * 14 * sh, (r() - .5) * 14 * sh);
+  let fn = scene1;
+  for (const [s, f] of SCENES) if (t >= s) fn = f;
+  fn(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  overlays(t, frame);
+};
+
+async function init() {
+  await Promise.all([document.fonts.load(`300 100px ${COND}`), document.fonts.load(`200 100px ${COND}`),
+    document.fonts.load(`400 100px ${SANS}`), document.fonts.load(`500 100px ${MONO}`)]);
+  fitLogo();
+  const r = rng(7);
+  for (let k = 0; k < 6; k++) {
+    const g = Object.assign(document.createElement('canvas'), { width: 384, height: 384 });
+    const gc = g.getContext('2d'), img = gc.createImageData(384, 384);
+    for (let i = 0; i < img.data.length; i += 4) { const v = r() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+    gc.putImageData(img, 0, 0);
+    grain.push(g);
+  }
+  window.ready = true;
+}
+init().then(() => {
+  if (!new URLSearchParams(location.search).has('render')) {
+    const start = performance.now();
+    const loop = () => { renderFrame(Math.floor(((performance.now() - start) / 1000 % 15) * FPS)); requestAnimationFrame(loop); };
+    loop();
+  }
+});
+</script>
+</body>
+</html>
